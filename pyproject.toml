@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "price-breakout-scanner"
+version = "1.0.0"
+description = "Read-only command-line scanner for Atlas trade-selection data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+authors = [{ name = "James Serenson" }]
+dependencies = []
+
+[project.scripts]
+price-breakout-scanner = "price_breakout_scanner.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

@@ -16,6 +16,9 @@ __pycache__/
 *.db
 *.sqbpro
 
+# Scanner reports
+reports/
+
 
 # SQLite temporary and lock files
 *.db-journal
