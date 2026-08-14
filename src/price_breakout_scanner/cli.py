@@ -36,8 +36,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--transition", action="append", default=[])
     result.add_argument("--symbol", action="append", default=[])
     result.add_argument("--limit", type=int, default=20)
-    result.add_argument("--export", type=Path, help="Write results to a .csv or .json file")
-    result.add_argument("--format", choices=("csv", "json"), help="Export format override")
+    result.add_argument("--export", type=Path, help="Write results to a .csv, .json, or .xlsx file")
+    result.add_argument("--format", choices=("csv", "json", "xlsx"), help="Export format override")
     return result
 
 
@@ -73,14 +73,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.export:
         format_name = args.format or args.export.suffix.lower().lstrip(".")
-        if format_name not in {"csv", "json"}:
-            print("error: export must use .csv/.json or --format", file=sys.stderr)
+        if format_name not in {"csv", "json", "xlsx"}:
+            print("error: export must use .csv/.json/.xlsx or --format", file=sys.stderr)
             return 2
-        output = write_export(args.export, candidates, format_name)
+        try:
+            output = write_export(args.export, candidates, format_name)
+        except (OSError, RuntimeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
         print(f"Exported: {output.resolve()}")
     return 0
 
 
 def _csv_values(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
-

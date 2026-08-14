@@ -47,7 +47,11 @@ PYTHONPATH=src python -m price_breakout_scanner --symbol IDCC --symbol ULTA
 # Export a larger result set
 PYTHONPATH=src python -m price_breakout_scanner --limit 100 --export reports/latest.csv
 PYTHONPATH=src python -m price_breakout_scanner --limit 100 --export reports/latest.json
+PYTHONPATH=src python -m price_breakout_scanner --limit 100 --export reports/latest.xlsx
 ```
+
+Excel exports use Menlo Regular at 16 points, freeze the top row, enable table
+filters, and size the columns to their contents (with sensible caps for long text).
 
 Use `--help` for all filters, including archetype, transition, grade, liquidity,
 and bullish-structure overrides.
@@ -70,4 +74,3 @@ PRICE_BREAKOUT_DB=/path/to/database.db PYTHONPATH=src python -m price_breakout_s
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
 ```
-

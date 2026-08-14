@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import subprocess
+import tempfile
 from collections.abc import Sequence
+from importlib.resources import as_file, files
 from pathlib import Path
 
 from .models import Candidate
@@ -39,7 +43,9 @@ def write_export(path: str | Path, candidates: Sequence[Candidate], format_name:
     output = Path(path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     records = [candidate.as_dict() for candidate in candidates]
-    if format_name == "json":
+    if format_name == "xlsx":
+        _write_xlsx(output, records)
+    elif format_name == "json":
         output.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
     else:
         with output.open("w", newline="", encoding="utf-8") as handle:
@@ -52,6 +58,47 @@ def write_export(path: str | Path, candidates: Sequence[Candidate], format_name:
     return output
 
 
+def _write_xlsx(output: Path, records: list[dict[str, object]]) -> None:
+    """Build an Excel workbook with the bundled artifact-tool runtime."""
+    node = Path(
+        os.environ.get(
+            "PRICE_BREAKOUT_NODE",
+            "/Users/jamesserenson/.cache/codex-runtimes/codex-primary-runtime/"
+            "dependencies/node/bin/node",
+        )
+    )
+    node_modules = Path(
+        os.environ.get(
+            "PRICE_BREAKOUT_NODE_MODULES",
+            "/Users/jamesserenson/.cache/codex-runtimes/codex-primary-runtime/"
+            "dependencies/node/node_modules",
+        )
+    )
+    if not node.is_file() or not node_modules.is_dir():
+        raise RuntimeError(
+            "Excel export runtime is unavailable. Set PRICE_BREAKOUT_NODE and "
+            "PRICE_BREAKOUT_NODE_MODULES to the bundled Node runtime paths."
+        )
+
+    with tempfile.TemporaryDirectory(prefix="price-breakout-xlsx-") as temp_name:
+        temp = Path(temp_name)
+        (temp / "node_modules").symlink_to(node_modules, target_is_directory=True)
+        data_path = temp / "candidates.json"
+        data_path.write_text(json.dumps(records), encoding="utf-8")
+        builder_resource = files("price_breakout_scanner").joinpath("xlsx_builder.mjs")
+        with as_file(builder_resource) as builder:
+            completed = subprocess.run(
+                [str(node), str(builder), str(data_path), str(output.resolve()), str(temp)],
+                text=True,
+                capture_output=True,
+                check=False,
+                cwd=temp,
+            )
+        if completed.returncode:
+            message = completed.stderr.strip() or completed.stdout.strip()
+            raise RuntimeError(f"Excel export failed: {message}")
+
+
 def _signal(candidate: Candidate) -> str:
     signals = []
     if candidate.rank1_ignition:
@@ -61,4 +108,3 @@ def _signal(candidate: Candidate) -> str:
     if candidate.pullback_completing:
         signals.append("pullback")
     return ",".join(signals) or candidate.description or "-"
-

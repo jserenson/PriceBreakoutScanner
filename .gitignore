@@ -18,6 +18,7 @@ __pycache__/
 
 # Scanner reports
 reports/
+outputs/
 
 
 # SQLite temporary and lock files
