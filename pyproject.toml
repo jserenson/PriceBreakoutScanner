@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "price-breakout-scanner"
-version = "1.0.0"
-description = "Read-only command-line scanner for Atlas trade-selection data"
+version = "1.1.0"
+description = "Read-only price-action breakout scanner for nightly market data"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }

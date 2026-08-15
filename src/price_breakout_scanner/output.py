@@ -13,19 +13,17 @@ from .models import Candidate
 
 
 def render_table(candidates: Sequence[Candidate]) -> str:
-    headers = ("#", "Symbol", "Score", "Grade", "Price", "Confidence", "Setup", "Signal")
+    headers = ("#", "Symbol", "PA Score", "Setup", "Price", "Resistance", "To Res", "10D Range", "Vol", "Mom 5D", "Stage", "Legacy")
     rows = [
         (
-            candidate.rank if candidate.rank is not None else "-",
-            candidate.symbol,
-            f"{candidate.score:.2f}",
-            candidate.grade or "-",
-            f"{candidate.price:.2f}" if candidate.price is not None else "-",
-            f"{candidate.confidence:.0f}%" if candidate.confidence is not None else "-",
-            candidate.archetype or "-",
-            _signal(candidate),
+            item.rank or "-", item.symbol, f"{item.score:.2f}", item.setup,
+            f"{item.price:.2f}", f"{item.resistance:.2f}",
+            f"{item.distance_to_resistance_pct:.1f}%", f"{item.range_10d_pct:.1f}%",
+            f"{item.volume_ratio:.2f}x", f"{item.momentum_5d_pct:.1f}%",
+            item.weinstein_stage,
+            f"{item.grade or '-'} / {item.legacy_score:.1f}" if item.legacy_score is not None else "-",
         )
-        for candidate in candidates
+        for item in candidates
     ]
     widths = [len(header) for header in headers]
     for row in rows:
@@ -53,58 +51,23 @@ def write_export(path: str | Path, candidates: Sequence[Candidate], format_name:
                 writer = csv.DictWriter(handle, fieldnames=records[0].keys())
                 writer.writeheader()
                 writer.writerows(records)
-            else:
-                handle.write("")
     return output
 
 
 def _write_xlsx(output: Path, records: list[dict[str, object]]) -> None:
-    """Build an Excel workbook with the bundled artifact-tool runtime."""
-    node = Path(
-        os.environ.get(
-            "PRICE_BREAKOUT_NODE",
-            "/Users/jamesserenson/.cache/codex-runtimes/codex-primary-runtime/"
-            "dependencies/node/bin/node",
-        )
-    )
-    node_modules = Path(
-        os.environ.get(
-            "PRICE_BREAKOUT_NODE_MODULES",
-            "/Users/jamesserenson/.cache/codex-runtimes/codex-primary-runtime/"
-            "dependencies/node/node_modules",
-        )
-    )
+    node = Path(os.environ.get("PRICE_BREAKOUT_NODE", "/Users/jamesserenson/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"))
+    node_modules = Path(os.environ.get("PRICE_BREAKOUT_NODE_MODULES", "/Users/jamesserenson/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"))
     if not node.is_file() or not node_modules.is_dir():
-        raise RuntimeError(
-            "Excel export runtime is unavailable. Set PRICE_BREAKOUT_NODE and "
-            "PRICE_BREAKOUT_NODE_MODULES to the bundled Node runtime paths."
-        )
-
+        raise RuntimeError("Excel export runtime unavailable; set PRICE_BREAKOUT_NODE and PRICE_BREAKOUT_NODE_MODULES")
     with tempfile.TemporaryDirectory(prefix="price-breakout-xlsx-") as temp_name:
         temp = Path(temp_name)
         (temp / "node_modules").symlink_to(node_modules, target_is_directory=True)
         data_path = temp / "candidates.json"
         data_path.write_text(json.dumps(records), encoding="utf-8")
-        builder_resource = files("price_breakout_scanner").joinpath("xlsx_builder.mjs")
-        with as_file(builder_resource) as builder:
+        with as_file(files("price_breakout_scanner").joinpath("xlsx_builder.mjs")) as builder:
             completed = subprocess.run(
                 [str(node), str(builder), str(data_path), str(output.resolve()), str(temp)],
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=temp,
+                text=True, capture_output=True, check=False, cwd=temp,
             )
         if completed.returncode:
-            message = completed.stderr.strip() or completed.stdout.strip()
-            raise RuntimeError(f"Excel export failed: {message}")
-
-
-def _signal(candidate: Candidate) -> str:
-    signals = []
-    if candidate.rank1_ignition:
-        signals.append("ignition")
-    if candidate.momentum_recovering:
-        signals.append("recovering")
-    if candidate.pullback_completing:
-        signals.append("pullback")
-    return ",".join(signals) or candidate.description or "-"
+            raise RuntimeError(f"Excel export failed: {completed.stderr.strip() or completed.stdout.strip()}")

@@ -10,14 +10,14 @@ from .output import render_table, write_export
 from .scanner import BreakoutScanner, ScannerError
 
 DEFAULT_DATABASE = Path(
-    "/Users/jamesserenson/Documents/AnacondaProjects/Atlas-Runs/PriceBreakoutScanner.db"
+    "/Users/jamesserenson/Documents/AnacondaProjects/Stage5_SymbolDatabase/symbols.db"
 )
 
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         prog="price-breakout-scanner",
-        description="Rank Atlas breakout candidates without modifying the source database.",
+        description="Rank price-action breakout candidates from read-only market history.",
     )
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     result.add_argument(
@@ -26,14 +26,14 @@ def parser() -> argparse.ArgumentParser:
         help="SQLite database (or set PRICE_BREAKOUT_DB)",
     )
     result.add_argument("--date", help="Trading date in YYYY-MM-DD form; defaults to latest")
-    result.add_argument("--dates", action="store_true", help="List recent available dates and exit")
-    result.add_argument("--min-score", type=float, default=70.0)
-    result.add_argument("--grades", default="A,B", help="Comma-separated grades; empty means all")
+    result.add_argument("--dates", action="store_true", help="List recent session coverage and exit")
+    result.add_argument("--min-score", type=float, default=55.0, help="Minimum price-action score")
+    result.add_argument("--grades", default="", help="Optional legacy Atlas grades; empty means all")
     result.add_argument("--min-dollar-volume", type=int, default=1_000_000)
     result.add_argument("--allow-illiquid", action="store_true")
-    result.add_argument("--allow-nonbullish", action="store_true")
-    result.add_argument("--archetype", action="append", default=[])
-    result.add_argument("--transition", action="append", default=[])
+    result.add_argument("--allow-nonbullish", action="store_true", help=argparse.SUPPRESS)
+    result.add_argument("--archetype", action="append", default=[], help=argparse.SUPPRESS)
+    result.add_argument("--transition", action="append", default=[], help=argparse.SUPPRESS)
     result.add_argument("--symbol", action="append", default=[])
     result.add_argument("--limit", type=int, default=20)
     result.add_argument("--export", type=Path, help="Write results to a .csv, .json, or .xlsx file")
@@ -47,7 +47,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         scanner.validate()
         if args.dates:
-            print("\n".join(scanner.available_dates()))
+            for session_date, count, complete in scanner.session_dates():
+                print(f"{session_date}  {count:>5} symbols  {'complete' if complete else 'partial'}")
             return 0
         selected_date, candidates = scanner.scan(
             date=args.date,
