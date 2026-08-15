@@ -32,7 +32,7 @@ class BreakoutScannerTests(unittest.TestCase):
                 );
                 INSERT INTO symbols VALUES
                     (1, 'NET', 'Winner', 1), (2, 'EXT', 'Extended', 1),
-                    (3, 'FLAT', 'No Setup', 1);
+                    (3, 'FLAT', 'No Setup', 1), (4, 'MATURE', 'Mature Trend', 1);
                 """
             )
             start = date(2026, 1, 1)
@@ -48,9 +48,11 @@ class BreakoutScannerTests(unittest.TestCase):
                 if index >= 174:
                     extended += (index - 173) * 5
                 flat = 50 + ((index % 8) - 4) * 0.8
+                mature = 49 if index < 80 else 49 + (index - 79) * 0.43
                 for symbol_id, close, volume in (
                     (1, net, 900_000 if index < 179 else 1_500_000),
                     (2, extended, 800_000), (3, flat, 10_000),
+                    (4, mature, 500_000),
                 ):
                     rows.append((symbol_id, session, close - .2, close + .5, close - .5, close, volume))
             connection.executemany("INSERT INTO price_history VALUES (?,?,?,?,?,?,?)", rows)
@@ -90,6 +92,16 @@ class BreakoutScannerTests(unittest.TestCase):
         by_symbol = {candidate.symbol: candidate for candidate in candidates}
         self.assertGreater(by_symbol["NET"].score, by_symbol["EXT"].score)
         self.assertGreater(by_symbol["EXT"].extension_20d_pct, 15)
+
+    def test_mature_stage2_trend_without_fresh_base_is_demoted(self) -> None:
+        _, candidates = self.scanner.scan(
+            min_score=0, symbols=["MATURE"], require_liquidity=False
+        )
+        mature = candidates[0]
+        self.assertGreater(mature.runup_60d_pct, 25)
+        self.assertGreater(mature.ema8_ema50_spread_pct, 6)
+        self.assertGreaterEqual(mature.maturity_penalty, 20)
+        self.assertLess(mature.score, 55)
 
     def test_liquidity_filter_excludes_thin_symbol(self) -> None:
         _, candidates = self.scanner.scan(min_score=0, symbols=["FLAT"])

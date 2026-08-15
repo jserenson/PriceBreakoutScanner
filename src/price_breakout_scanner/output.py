@@ -13,13 +13,15 @@ from .models import Candidate
 
 
 def render_table(candidates: Sequence[Candidate]) -> str:
-    headers = ("#", "Symbol", "PA Score", "Setup", "Price", "Resistance", "To Res", "10D Range", "Vol", "Mom 5D", "Stage", "Legacy")
+    headers = ("#", "Symbol", "PA Score", "Setup", "Price", "To Res", "10D Range", "Vol", "Mom 5D", "Run 60D", "EMA Gap", "Reset", "Penalty", "Stage", "Legacy")
     rows = [
         (
             item.rank or "-", item.symbol, f"{item.score:.2f}", item.setup,
-            f"{item.price:.2f}", f"{item.resistance:.2f}",
-            f"{item.distance_to_resistance_pct:.1f}%", f"{item.range_10d_pct:.1f}%",
+            f"{item.price:.2f}", f"{item.distance_to_resistance_pct:.1f}%", f"{item.range_10d_pct:.1f}%",
             f"{item.volume_ratio:.2f}x", f"{item.momentum_5d_pct:.1f}%",
+            f"{item.runup_60d_pct:.1f}%", f"{item.ema8_ema50_spread_pct:.1f}%",
+            item.bars_since_reset if item.bars_since_reset is not None else ">60",
+            f"-{item.maturity_penalty:.0f}",
             item.weinstein_stage,
             f"{item.grade or '-'} / {item.legacy_score:.1f}" if item.legacy_score is not None else "-",
         )

@@ -61,6 +61,32 @@ date. Resistance explicitly excludes the current bar to avoid look-ahead bias.
 | Weinstein context | 15 | Stage 2/1/3/4 contributes 15/8/2/-5. Stored `weinstein_stages` is used when available. Otherwise the stage is derived from close vs SMA150 and the 20-day change in SMA150. |
 | Overextension | penalty | Close >7%/10%/15% above SMA20 subtracts 5/10/15. More than 8% beyond resistance subtracts another 10. |
 
+### Mature-trend safeguards
+
+Stage 2 alone is not enough. The scanner now measures whether a stock is early
+in a move or simply pausing after a long advance:
+
+- `runup_60d_pct = close / minimum(low, 60) - 1`. Run-ups above 25%, 35%, and
+  50% subtract 8, 15, and 22 points.
+- `ema8_ema50_spread_pct = EMA8 / EMA50 - 1`. Separation above 6%, 9%, and 12%
+  subtracts 6, 12, and 18 points.
+- A reset bar requires `close <= EMA20 * 1.02` and EMA8/EMA50 separation <=6%.
+  More than 25 bars since reset subtracts 8 points; more than 40 bars (or no
+  reset within 60 bars) subtracts 12.
+- A non-breakout `READY`/`TIGHTENING` candidate with both >30% 60-day run-up and
+  >9% EMA separation loses an additional 10 points.
+- A confirmed 0–5% breakout with current volume >=1.2x its prior-20-day average
+  still carries maturity risk, but the maturity penalty is capped at 20. This
+  keeps genuine price/volume confirmation reviewable without allowing a mature
+  trend to receive an unqualified top score.
+
+The output exposes the run-up, EMA spread, reset age, and total maturity penalty.
+For example, AAMI on 2026-08-14 falls from 93 to 48 because its 36% 60-day
+run-up, 11.6% EMA spread, and 30-bar reset age describe a mature trend rather
+than an early base. NET on 2026-08-13 remains at the default threshold because
+its price/volume breakout is confirmed, but its extension is still visible and
+penalized.
+
 Setup labels:
 
 - `BREAKOUT`: 0–5% above prior resistance with volume >=1.2x.

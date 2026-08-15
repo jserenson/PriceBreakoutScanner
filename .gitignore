@@ -45,7 +45,9 @@ wheels/
 
 # PyCharm / VSCode
 .idea/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
 
 # macOS
 .DS_Store

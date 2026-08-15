@@ -24,6 +24,10 @@ class Candidate:
     momentum_5d_pct: float
     momentum_20d_pct: float
     extension_20d_pct: float
+    runup_60d_pct: float
+    ema8_ema50_spread_pct: float
+    bars_since_reset: int | None
+    maturity_penalty: float
     weinstein_stage: int
     stage_source: str
     dollar_volume_20d: int
@@ -35,4 +39,3 @@ class Candidate:
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
-

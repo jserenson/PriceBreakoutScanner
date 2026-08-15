@@ -216,14 +216,24 @@ class BreakoutScanner:
         stage = stored_stage or computed_stage
         stage_source = "stored" if stored_stage is not None else "computed"
         extension = cls._pct(close, sma20)
+        ema8_series = cls._ema(closes, 8)
+        ema20_series = cls._ema(closes, 20)
+        ema50_series = cls._ema(closes, 50)
+        ema_spread = cls._pct(ema8_series[-1], ema50_series[-1])
+        runup_60 = cls._pct(close, min(lows[-60:]))
+        bars_since_reset = cls._bars_since_reset(closes, ema8_series, ema20_series, ema50_series)
         dollar_volume = int(close * statistics.fmean(volumes[-20:]))
 
-        score = cls._score(
+        setup = cls._setup_label(distance, breakout_pct, volume_ratio, tightening, range_10)
+        raw_score = cls._score(
             range_10, tightening, higher_low, distance, breakout_pct,
             volume_ratio, contraction, momentum_5, momentum_20,
             close > sma20, sma20 > sma50, stage, extension,
         )
-        setup = cls._setup_label(distance, breakout_pct, volume_ratio, tightening, range_10)
+        maturity_penalty = cls._maturity_penalty(
+            runup_60, ema_spread, bars_since_reset, setup, volume_ratio
+        )
+        score = max(0.0, raw_score - maturity_penalty)
         legacy_score, grade = legacy or (None, None)
         return Candidate(
             rank=None, symbol=symbol, company=clean[-1]["company_name"], date=date,
@@ -233,7 +243,9 @@ class BreakoutScanner:
             tightening_ratio=round(tightening, 3), higher_low_pct=round(higher_low, 2),
             volume_ratio=round(volume_ratio, 2), volume_contraction_ratio=round(contraction, 2),
             momentum_5d_pct=round(momentum_5, 2), momentum_20d_pct=round(momentum_20, 2),
-            extension_20d_pct=round(extension, 2), weinstein_stage=stage,
+            extension_20d_pct=round(extension, 2), runup_60d_pct=round(runup_60, 2),
+            ema8_ema50_spread_pct=round(ema_spread, 2), bars_since_reset=bars_since_reset,
+            maturity_penalty=round(maturity_penalty, 2), weinstein_stage=stage,
             stage_source=stage_source, dollar_volume_20d=dollar_volume,
             legacy_score=round(float(legacy_score), 2) if legacy_score is not None else None,
             grade=str(grade) if grade is not None else None,
@@ -272,6 +284,45 @@ class BreakoutScanner:
         if breakout > 8:
             score -= 10
         return max(0.0, min(100.0, score))
+
+    @staticmethod
+    def _maturity_penalty(
+        runup_60: float, ema_spread: float, bars_since_reset: int | None,
+        setup: str, volume_ratio: float,
+    ) -> float:
+        """Penalize mature trends while retaining confirmed breakouts for review."""
+        penalty = 22 if runup_60 > 50 else 15 if runup_60 > 35 else 8 if runup_60 > 25 else 0
+        penalty += 18 if ema_spread > 12 else 12 if ema_spread > 9 else 6 if ema_spread > 6 else 0
+        if bars_since_reset is None or bars_since_reset > 40:
+            penalty += 12
+        elif bars_since_reset > 25:
+            penalty += 8
+        if setup != "BREAKOUT" and runup_60 > 30 and ema_spread > 9:
+            penalty += 10
+        if setup == "BREAKOUT" and volume_ratio >= 1.2:
+            penalty = min(penalty, 20)
+        return float(penalty)
+
+    @staticmethod
+    def _ema(values: Sequence[float], period: int) -> list[float]:
+        alpha = 2 / (period + 1)
+        result = [values[0]]
+        for value in values[1:]:
+            result.append(alpha * value + (1 - alpha) * result[-1])
+        return result
+
+    @classmethod
+    def _bars_since_reset(
+        cls, closes: Sequence[float], ema8: Sequence[float],
+        ema20: Sequence[float], ema50: Sequence[float],
+    ) -> int | None:
+        """Bars since price and the fast EMA ribbon last compressed near trend."""
+        for bars_ago in range(0, min(61, len(closes))):
+            index = len(closes) - 1 - bars_ago
+            spread = cls._pct(ema8[index], ema50[index])
+            if closes[index] <= ema20[index] * 1.02 and spread <= 6:
+                return bars_ago
+        return None
 
     @staticmethod
     def _setup_label(distance: float, breakout: float, volume: float, tightening: float, range_10: float) -> str:
