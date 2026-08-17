@@ -4,6 +4,7 @@ import csv
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -15,7 +16,7 @@ class BreakoutScannerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.database = Path(self.temporary.name) / "scanner.db"
-        with sqlite3.connect(self.database) as connection:
+        with closing(sqlite3.connect(self.database)) as connection:
             connection.executescript(
                 """
                 CREATE TABLE symbols (
@@ -40,10 +41,14 @@ class BreakoutScannerTests(unittest.TestCase):
             for index in range(180):
                 session = (start + timedelta(days=index)).isoformat()
                 net = 100 + index * 0.18
-                if index >= 160:
-                    net = 131 + (index - 160) * 0.12 + ((index % 3) - 1) * 0.25
-                if index == 179:
-                    net = 134.25
+                if 150 <= index < 165:
+                    net = 128 + ((index % 3) - 1) * 0.25
+                elif 165 <= index < 173:
+                    net = 128 - (index - 164) * 0.65
+                elif 173 <= index < 177:
+                    net = 122.8 + (index - 173) * 0.15
+                elif index >= 177:
+                    net = (126.0, 130.0, 134.25)[index - 177]
                 extended = 60 + index * 0.10
                 if index >= 174:
                     extended += (index - 173) * 5
@@ -62,6 +67,7 @@ class BreakoutScannerTests(unittest.TestCase):
             # Add a deliberately partial next session (one of three symbols).
             partial = (start + timedelta(days=180)).isoformat()
             connection.execute("INSERT INTO price_history VALUES (1,?,?,?,?,?,?)", (partial, 134, 135, 133, 134.5, 500_000))
+            connection.commit()
         self.latest = (date(2026, 1, 1) + timedelta(days=179)).isoformat()
         self.scanner = BreakoutScanner(self.database)
 
@@ -74,11 +80,14 @@ class BreakoutScannerTests(unittest.TestCase):
         self.assertFalse(sessions[0][2])
         self.assertTrue(sessions[1][2])
 
-    def test_price_action_winner_is_found_without_legacy_grade_filter(self) -> None:
+    def test_recent_synchronized_ignition_is_found_without_legacy_grade_filter(self) -> None:
         date_value, candidates = self.scanner.scan(min_score=0, symbols=["NET"])
         self.assertEqual(date_value, self.latest)
         self.assertEqual(candidates[0].symbol, "NET")
-        self.assertIn(candidates[0].setup, {"BREAKOUT", "READY"})
+        self.assertEqual(candidates[0].ignition_state, "EMERGING")
+        self.assertLessEqual(candidates[0].bars_since_di_cross, 5)
+        self.assertTrue(candidates[0].di_cross_confirmed)
+        self.assertIsNotNone(candidates[0].bars_since_ignition)
         self.assertEqual(candidates[0].grade, "C")
 
     def test_legacy_grade_is_optional_but_can_filter(self) -> None:
@@ -102,6 +111,16 @@ class BreakoutScannerTests(unittest.TestCase):
         self.assertGreater(mature.ema8_ema50_spread_pct, 6)
         self.assertGreaterEqual(mature.maturity_penalty, 20)
         self.assertLess(mature.score, 55)
+        self.assertNotEqual(mature.ignition_state, "EMERGING")
+
+    def test_broken_structure_is_hard_rejected(self) -> None:
+        _, candidates = self.scanner.scan(
+            min_score=0, symbols=["FLAT"], require_liquidity=False
+        )
+        candidate = candidates[0]
+        self.assertEqual(candidate.ignition_state, "REJECTED")
+        self.assertEqual(candidate.score, 0)
+        self.assertIn("structure", candidate.rejection_reason)
 
     def test_liquidity_filter_excludes_thin_symbol(self) -> None:
         _, candidates = self.scanner.scan(min_score=0, symbols=["FLAT"])
@@ -117,6 +136,8 @@ class BreakoutScannerTests(unittest.TestCase):
             rows = list(csv.DictReader(handle))
         self.assertEqual(rows[0]["symbol"], "NET")
         self.assertIn("tightening_ratio", rows[0])
+        self.assertIn("bars_since_ignition", rows[0])
+        self.assertIn("event_risk", rows[0])
 
     def test_missing_database_has_clear_error(self) -> None:
         with self.assertRaisesRegex(ScannerError, "Database not found"):

@@ -17,7 +17,7 @@ DEFAULT_DATABASE = Path(
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(
         prog="price-breakout-scanner",
-        description="Rank price-action breakout candidates from read-only market history.",
+        description="Detect recent synchronized price-action ignitions from read-only market history.",
     )
     result.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     result.add_argument(
@@ -27,7 +27,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--date", help="Trading date in YYYY-MM-DD form; defaults to latest")
     result.add_argument("--dates", action="store_true", help="List recent session coverage and exit")
-    result.add_argument("--min-score", type=float, default=55.0, help="Minimum price-action score")
+    result.add_argument("--min-score", type=float, default=55.0, help="Minimum recent-ignition score")
     result.add_argument("--grades", default="", help="Optional legacy Atlas grades; empty means all")
     result.add_argument("--min-dollar-volume", type=int, default=1_000_000)
     result.add_argument("--allow-illiquid", action="store_true")

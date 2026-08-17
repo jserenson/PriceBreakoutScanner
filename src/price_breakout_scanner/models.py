@@ -28,6 +28,28 @@ class Candidate:
     ema8_ema50_spread_pct: float
     bars_since_reset: int | None
     maturity_penalty: float
+    ignition_state: str
+    bars_since_di_cross: int | None
+    di_cross_confirmed: bool
+    di_plus: float
+    di_minus: float
+    adx: float
+    adx_slope_5d: float
+    adx_at_cross: float | None
+    squeeze_momentum: float
+    squeeze_slope_3d: float
+    squeeze_recent_turn: bool
+    tmo: float
+    tmo_slope_3d: float
+    macd_trend_hist: float
+    macd_trend_slope_3d: float
+    macd_timing_hist: float
+    macd_timing_slope_3d: float
+    bars_since_structure_restored: int | None
+    bars_since_ignition: int | None
+    move_since_ignition_pct: float | None
+    event_risk: str
+    rejection_reason: str | None
     weinstein_stage: int
     stage_source: str
     dollar_volume_20d: int

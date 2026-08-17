@@ -5,8 +5,10 @@ import sqlite3
 import statistics
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
+from contextlib import closing
 from pathlib import Path
 
+from . import indicators
 from .models import Candidate
 
 
@@ -36,7 +38,7 @@ class BreakoutScanner:
             raise ScannerError(f"Cannot open database: {exc}") from exc
 
     def validate(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             tables = self._tables(connection)
         missing = self.REQUIRED_TABLES - tables
         if missing:
@@ -46,7 +48,7 @@ class BreakoutScanner:
 
     def session_dates(self, limit: int = 10) -> list[tuple[str, int, bool]]:
         """Return recent dates, symbol coverage, and completeness."""
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             rows = connection.execute(
                 "SELECT date, COUNT(DISTINCT symbol_id) AS symbols "
                 "FROM price_history GROUP BY date ORDER BY date DESC LIMIT ?",
@@ -98,7 +100,7 @@ class BreakoutScanner:
         selected_symbols = tuple(sorted({value.upper() for value in symbols}))
         grade_values = tuple(sorted({value.upper() for value in grades}))
 
-        with self._connect() as connection:
+        with closing(self._connect()) as connection:
             date = date or self.latest_complete_date()
             cutoff = self._history_cutoff(connection, date)
             histories = self._load_history(connection, cutoff, date, selected_symbols)
@@ -224,20 +226,71 @@ class BreakoutScanner:
         bars_since_reset = cls._bars_since_reset(closes, ema8_series, ema20_series, ema50_series)
         dollar_volume = int(close * statistics.fmean(volumes[-20:]))
 
-        setup = cls._setup_label(distance, breakout_pct, volume_ratio, tightening, range_10)
-        raw_score = cls._score(
-            range_10, tightening, higher_low, distance, breakout_pct,
-            volume_ratio, contraction, momentum_5, momentum_20,
-            close > sma20, sma20 > sma50, stage, extension,
+        di_plus, di_minus, adx_series = indicators.dmi_adx(highs, lows, closes)
+        macd_trend = indicators.macd_histogram(closes, 12, 26, 9)
+        macd_timing = indicators.macd_histogram(closes, 5, 13, 4)
+        tmo_series = indicators.true_momentum(closes)
+        squeeze_series = indicators.squeeze_momentum(highs, lows, closes)
+        structures = [
+            closes[index] > ema20_series[index]
+            and ema8_series[index] > ema20_series[index]
+            and ema20_series[index] >= ema50_series[index] * 0.98
+            for index in range(len(closes))
+        ]
+        bars_since_di_cross = indicators.bars_since_cross(di_plus, di_minus)
+        di_cross_confirmed = cls._di_cross_confirmed(di_plus, di_minus, bars_since_di_cross)
+        bars_since_structure = cls._bars_since_transition(structures)
+        bars_since_ignition = cls._bars_since_synchronized_ignition(
+            closes, ema8_series, structures, di_plus, di_minus,
+            macd_trend, macd_timing, tmo_series, squeeze_series,
+        )
+        move_since_ignition = (
+            cls._pct(close, closes[-1 - bars_since_ignition])
+            if bars_since_ignition is not None else None
+        )
+        adx_at_cross = (
+            adx_series[-1 - bars_since_di_cross]
+            if bars_since_di_cross is not None else None
+        )
+        adx_slope = indicators.slope(adx_series, 5)
+        squeeze_slope = indicators.slope(squeeze_series, 3)
+        squeeze_turn = indicators.recent_slope_turn(squeeze_series)
+        tmo_slope = indicators.slope(tmo_series, 3)
+        trend_slope = indicators.slope(macd_trend, 3)
+        timing_slope = indicators.slope(macd_timing, 3)
+        energy_lanes = sum(
+            (
+                adx_slope > 0,
+                squeeze_slope > 0,
+                tmo_slope > 0,
+                macd_trend[-1] > 0 and trend_slope > 0,
+                macd_timing[-1] > 0 and timing_slope > 0,
+            )
+        )
+        macd_improving = (
+            macd_trend[-1] > 0 and trend_slope > 0
+        ) or (
+            macd_timing[-1] > 0 and timing_slope > 0
+        )
+        ignition_state, rejection_reason = cls._ignition_state(
+            structures[-1], bars_since_di_cross, di_cross_confirmed,
+            bars_since_ignition, move_since_ignition, ema_spread,
+            ema8_series, ema20_series, energy_lanes, macd_improving,
+        )
+        score = cls._ignition_score(
+            ignition_state, bars_since_di_cross, di_cross_confirmed,
+            adx_at_cross, adx_slope, squeeze_slope, squeeze_turn,
+            tmo_series[-1], tmo_slope, macd_trend[-1], trend_slope,
+            macd_timing[-1], timing_slope, structures[-1], ema_spread,
+            move_since_ignition, bars_since_ignition,
         )
         maturity_penalty = cls._maturity_penalty(
-            runup_60, ema_spread, bars_since_reset, setup, volume_ratio
+            runup_60, ema_spread, bars_since_reset, ignition_state, volume_ratio
         )
-        score = max(0.0, raw_score - maturity_penalty)
         legacy_score, grade = legacy or (None, None)
         return Candidate(
             rank=None, symbol=symbol, company=clean[-1]["company_name"], date=date,
-            score=round(score, 2), setup=setup, price=round(close, 2),
+            score=round(score, 2), setup=ignition_state, price=round(close, 2),
             resistance=round(resistance, 2), distance_to_resistance_pct=round(distance, 2),
             breakout_pct=round(breakout_pct, 2), range_10d_pct=round(range_10, 2),
             tightening_ratio=round(tightening, 3), higher_low_pct=round(higher_low, 2),
@@ -245,11 +298,139 @@ class BreakoutScanner:
             momentum_5d_pct=round(momentum_5, 2), momentum_20d_pct=round(momentum_20, 2),
             extension_20d_pct=round(extension, 2), runup_60d_pct=round(runup_60, 2),
             ema8_ema50_spread_pct=round(ema_spread, 2), bars_since_reset=bars_since_reset,
-            maturity_penalty=round(maturity_penalty, 2), weinstein_stage=stage,
+            maturity_penalty=round(maturity_penalty, 2), ignition_state=ignition_state,
+            bars_since_di_cross=bars_since_di_cross, di_cross_confirmed=di_cross_confirmed,
+            di_plus=round(di_plus[-1], 2), di_minus=round(di_minus[-1], 2),
+            adx=round(adx_series[-1], 2), adx_slope_5d=round(adx_slope, 3),
+            adx_at_cross=round(adx_at_cross, 2) if adx_at_cross is not None else None,
+            squeeze_momentum=round(squeeze_series[-1], 3),
+            squeeze_slope_3d=round(squeeze_slope, 3), squeeze_recent_turn=squeeze_turn,
+            tmo=round(tmo_series[-1], 2), tmo_slope_3d=round(tmo_slope, 3),
+            macd_trend_hist=round(macd_trend[-1], 4),
+            macd_trend_slope_3d=round(trend_slope, 4),
+            macd_timing_hist=round(macd_timing[-1], 4),
+            macd_timing_slope_3d=round(timing_slope, 4),
+            bars_since_structure_restored=bars_since_structure,
+            bars_since_ignition=bars_since_ignition,
+            move_since_ignition_pct=round(move_since_ignition, 2) if move_since_ignition is not None else None,
+            event_risk="UNKNOWN", rejection_reason=rejection_reason,
+            weinstein_stage=stage,
             stage_source=stage_source, dollar_volume_20d=dollar_volume,
             legacy_score=round(float(legacy_score), 2) if legacy_score is not None else None,
             grade=str(grade) if grade is not None else None,
         )
+
+    @staticmethod
+    def _di_cross_confirmed(
+        di_plus: Sequence[float], di_minus: Sequence[float], bars_since_cross: int | None
+    ) -> bool:
+        if bars_since_cross is None or not di_plus[-1] > di_minus[-1]:
+            return False
+        start = len(di_plus) - 1 - bars_since_cross
+        observations = [di_plus[index] > di_minus[index] for index in range(start, len(di_plus))]
+        recent = observations[-min(3, len(observations)) :]
+        return all(recent) and sum(observations) / len(observations) >= 0.70
+
+    @staticmethod
+    def _bars_since_transition(states: Sequence[bool], limit: int = 60) -> int | None:
+        for bars_ago in range(0, min(limit, len(states) - 1) + 1):
+            index = len(states) - 1 - bars_ago
+            if states[index] and (index == 0 or not states[index - 1]):
+                return bars_ago
+        return None
+
+    @classmethod
+    def _bars_since_synchronized_ignition(
+        cls, closes: Sequence[float], ema8: Sequence[float], structures: Sequence[bool],
+        di_plus: Sequence[float], di_minus: Sequence[float], trend: Sequence[float],
+        timing: Sequence[float], tmo: Sequence[float], squeeze: Sequence[float],
+        limit: int = 60,
+    ) -> int | None:
+        first_index = max(6, len(closes) - 1 - limit)
+        for index in range(len(closes) - 1, first_index - 1, -1):
+            recent_cross = any(
+                di_plus[cross] > di_minus[cross]
+                and di_plus[cross - 1] <= di_minus[cross - 1]
+                for cross in range(max(1, index - 5), index + 1)
+            )
+            confirmations = sum(
+                (
+                    closes[index] > ema8[index],
+                    trend[index] > 0 and indicators.slope(trend, 3, index) > 0,
+                    timing[index] > 0 and indicators.slope(timing, 3, index) > 0,
+                    indicators.slope(tmo, 3, index) > 0,
+                    indicators.slope(squeeze, 3, index) > 0,
+                )
+            )
+            if recent_cross and structures[index] and confirmations >= 4:
+                return len(closes) - 1 - index
+        return None
+
+    @staticmethod
+    def _ignition_state(
+        structure_ok: bool, bars_since_cross: int | None, cross_confirmed: bool,
+        bars_since_ignition: int | None, move_since_ignition: float | None,
+        ema_spread: float, ema8: Sequence[float], ema20: Sequence[float],
+        energy_lanes: int, macd_improving: bool,
+    ) -> tuple[str, str | None]:
+        if not structure_ok or ema8[-1] <= ema20[-1] or indicators.slope(ema8, 5) <= 0:
+            return "REJECTED", "broken structure/current downtrend"
+        if bars_since_cross is not None and bars_since_cross <= 10 and not cross_confirmed:
+            return "REJECTED", "unconfirmed DI+ cross"
+        if ema_spread > 12:
+            return "REJECTED", "EMA ribbon too widely separated"
+        if bars_since_ignition is not None and bars_since_ignition > 30:
+            return "REJECTED", "stale ignition"
+        if move_since_ignition is not None and move_since_ignition > 20:
+            return "REJECTED", "move already completed"
+        if (
+            bars_since_ignition is not None and bars_since_ignition <= 12
+            and cross_confirmed and ema_spread <= 8
+            and energy_lanes >= 3 and macd_improving
+        ):
+            return "EMERGING", None
+        if bars_since_ignition is not None and bars_since_ignition <= 12:
+            return "WATCH", "recent ignition lacks current multi-lane confirmation"
+        if bars_since_ignition is not None and bars_since_ignition <= 30 and cross_confirmed and ema_spread <= 10:
+            return "CONTINUATION", None
+        return "WATCH", "ignition lacks current multi-lane confirmation"
+
+    @staticmethod
+    def _ignition_score(
+        state: str, bars_since_cross: int | None, cross_confirmed: bool,
+        adx_at_cross: float | None, adx_slope: float, squeeze_slope: float,
+        squeeze_turn: bool, tmo: float, tmo_slope: float, trend: float,
+        trend_slope: float, timing: float, timing_slope: float,
+        structure_ok: bool, ema_spread: float, move_since_ignition: float | None,
+        bars_since_ignition: int | None,
+    ) -> float:
+        if state == "REJECTED":
+            return 0.0
+        score = 0.0
+        if bars_since_ignition is not None:
+            score += 22 if bars_since_ignition <= 3 else 18 if bars_since_ignition <= 7 else 14 if bars_since_ignition <= 12 else 8
+        if bars_since_cross is not None:
+            score += 10 if bars_since_cross <= 3 else 8 if bars_since_cross <= 7 else 5 if bars_since_cross <= 12 else 0
+        score += 5 if cross_confirmed else -20
+        if adx_at_cross is not None:
+            score += 4 if adx_at_cross < 20 else 3 if adx_at_cross <= 30 else 0 if adx_at_cross <= 40 else -3
+        score += 3 if adx_slope > 0 else 0
+        score += 5 if squeeze_slope > 0 else 0
+        score += 2 if squeeze_turn else 0
+        score += 4 if tmo_slope > 0 else 0
+        score += 2 if -20 <= tmo <= 70 else -2 if tmo > 85 else 0
+        score += 4 if trend > 0 and trend_slope > 0 else 0
+        score += 4 if timing > 0 and timing_slope > 0 else 0
+        score += 2 if trend > 0 and timing > 0 else 0
+        score += 8 if structure_ok else -40
+        score += 6 if ema_spread <= 4 else 4 if ema_spread <= 6 else 0 if ema_spread <= 9 else -6
+        if move_since_ignition is not None:
+            score += 6 if move_since_ignition <= 5 else 3 if move_since_ignition <= 12 else 0 if move_since_ignition <= 20 else -20
+        if state == "WATCH":
+            score = min(score, 49)
+        elif state == "CONTINUATION":
+            score = min(score, 54)
+        return max(0.0, min(100.0, score))
 
     @staticmethod
     def _score(

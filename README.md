@@ -1,11 +1,13 @@
-# PriceBreakoutScanner 1.1
+# PriceBreakoutScanner 1.2
 
-PriceBreakoutScanner ranks stocks from raw end-of-day `price_history`. Atlas
-TradeScore and TradeGrade are retained as optional comparison columns, but they
-do not drive the default ranking or eligibility rules.
+PriceBreakoutScanner is a **recent synchronized-ignition detector**. It is not a
+general list of strong stocks. It walks raw end-of-day `price_history` and looks
+for the clustered transition from compression/recovery into a newly confirmed
+bullish move.
 
-The scanner opens SQLite in read-only mode. Its default source is the actively
-updated nightly database:
+Atlas TradeScore and TradeGrade remain optional comparison columns and do not
+drive default selection. SQLite is opened read-only. The default nightly source
+is:
 
 ```text
 /Users/jamesserenson/Documents/AnacondaProjects/Stage5_SymbolDatabase/symbols.db
@@ -13,112 +15,102 @@ updated nightly database:
 
 ## Run
 
+In VS Code select **Run PriceBreakoutScanner** and press `F5`. Select **Export
+PriceBreakoutScanner Excel** to create `reports/latest.xlsx`.
+
+Terminal equivalents:
+
 ```bash
 PYTHONPATH=src python3 -m price_breakout_scanner
-```
-
-The default scan uses the newest **complete** session, price-action score >=55,
-20-day average dollar volume >=$1 million, and the top 20 results. A session is
-complete when its distinct-symbol coverage is at least 95% of the median across
-recent prior sessions. This prevents a partially loaded current date from being
-ranked as if it were final.
-
-```bash
-# Show coverage and complete/partial status
-PYTHONPATH=src python3 -m price_breakout_scanner --dates
-
-# Validate a known example or scan a completed historical session
-PYTHONPATH=src python3 -m price_breakout_scanner --date 2026-08-13 --symbol NET --min-score 0
-
-# Raise the price-action threshold
-PYTHONPATH=src python3 -m price_breakout_scanner --min-score 75 --limit 50
-
-# Legacy grade is optional; specify it only when comparison filtering is wanted
-PYTHONPATH=src python3 -m price_breakout_scanner --grades A,B
-
-# Export the same ranked records
-PYTHONPATH=src python3 -m price_breakout_scanner --limit 100 --export reports/latest.csv
-PYTHONPATH=src python3 -m price_breakout_scanner --limit 100 --export reports/latest.json
 PYTHONPATH=src python3 -m price_breakout_scanner --limit 100 --export reports/latest.xlsx
+PYTHONPATH=src python3 -m price_breakout_scanner --dates
 ```
 
-Excel output uses Menlo Regular at 16 points, freezes the top row, provides
-filters and banded rows, sizes columns to content, and includes a Methodology
-worksheet.
+The newest session is used only when its symbol coverage is at least 95% of the
+recent-session median. Defaults are score >=55, 20-day dollar volume >=$1
+million, and 20 rows. `--min-score 0 --symbol VRTX` exposes rejected/watch
+diagnostics for research.
 
-## Price-action model
+## Indicator definitions
 
-The score is capped to 0–100. All calculations use only bars through the selected
-date. Resistance explicitly excludes the current bar to avoid look-ahead bias.
+All signals use data through the selected date—there is no look-ahead.
 
-| Component | Max | Formula and thresholds |
-|---|---:|---|
-| Consolidation | 20 | `range10 = (max(high,10)-min(low,10))/close`; `tightening = range10/range40`. Tightening earns 12/8/4 points at <=0.55/0.75/1.00. Range earns 8/5/2 at <=8%/12%/18%. |
-| Higher lows | 15 | Compare minimum low over the newest 10 bars with the prior 10. >=0% earns 15; >=-2% earns 8. |
-| Resistance | 20 | Resistance is the highest high in the prior 20 bars. A fresh breakout of 0–5% earns 20; distance below resistance of <=3%/7%/12% earns 18/12/5. |
-| Volume | 15 | Current volume is compared with the prior 20-day average. >=1.5x/1.2x earns 15/11. Otherwise prior-5-day contraction versus prior-20-day volume earns 10/7 at <=0.75x/0.90x. |
-| Momentum/trend | 15 | Improving positive 5-day momentum earns 8 (positive earns 4); close>SMA20 earns 4; SMA20>SMA50 earns 3. |
-| Weinstein context | 15 | Stage 2/1/3/4 contributes 15/8/2/-5. Stored `weinstein_stages` is used when available. Otherwise the stage is derived from close vs SMA150 and the 20-day change in SMA150. |
-| Overextension | penalty | Close >7%/10%/15% above SMA20 subtracts 5/10/15. More than 8% beyond resistance subtracts another 10. |
+- **DI+/DI-/ADX:** Wilder 14. `bars_since_di_cross` starts when DI+ crosses
+  above DI-. Confirmation requires DI+ to remain above DI- on the most recent
+  bars and at least 70% of bars since the cross. ADX is sampled at the cross;
+  low ADX is allowed because chart research showed it may strengthen later.
+- **Squeeze momentum approximation:** 20-bar linear-regression endpoint of
+  `close - (((highest20 + lowest20) / 2 + SMA20) / 2)`. The report includes its
+  3-bar slope and whether the slope recently turned positive.
+- **TMO approximation:** the sum of 14 pairwise close comparisons, scaled to
+  -100..+100, then smoothed by EMA5 and EMA3. Value and 3-bar slope are reported.
+- **MACD Trend:** standard 12/26/9 histogram and 3-bar slope.
+- **MACD Timing:** faster 5/13/4 histogram and 3-bar slope.
+- **Bullish structure:** close > EMA20, EMA8 > EMA20, and EMA20 at least 98% of
+  EMA50. The scanner records when this structure was most recently restored.
+- **EMA separation:** `(EMA8 / EMA50 - 1) * 100`.
 
-### Mature-trend safeguards
+The TMO and Squeeze formulas are documented approximations. They may not exactly
+match proprietary chart implementations, but are stable and testable across the
+entire database.
 
-Stage 2 alone is not enough. The scanner now measures whether a stock is early
-in a move or simply pausing after a long advance:
+## Synchronized ignition and states
 
-- `runup_60d_pct = close / minimum(low, 60) - 1`. Run-ups above 25%, 35%, and
-  50% subtract 8, 15, and 22 points.
-- `ema8_ema50_spread_pct = EMA8 / EMA50 - 1`. Separation above 6%, 9%, and 12%
-  subtracts 6, 12, and 18 points.
-- A reset bar requires `close <= EMA20 * 1.02` and EMA8/EMA50 separation <=6%.
-  More than 25 bars since reset subtracts 8 points; more than 40 bars (or no
-  reset within 60 bars) subtracts 12.
-- A non-breakout `READY`/`TIGHTENING` candidate with both >30% 60-day run-up and
-  >9% EMA separation loses an additional 10 points.
-- A confirmed 0–5% breakout with current volume >=1.2x its prior-20-day average
-  still carries maturity risk, but the maturity penalty is capped at 20. This
-  keeps genuine price/volume confirmation reviewable without allowing a mature
-  trend to receive an unqualified top score.
+A synchronized ignition requires a DI+ cross in the preceding five bars,
+bullish structure, and at least four of these five confirmations:
 
-The output exposes the run-up, EMA spread, reset age, and total maturity penalty.
-For example, AAMI on 2026-08-14 falls from 93 to 48 because its 36% 60-day
-run-up, 11.6% EMA spread, and 30-bar reset age describe a mature trend rather
-than an early base. NET on 2026-08-13 remains at the default threshold because
-its price/volume breakout is confirmed, but its extension is still visible and
-penalized.
+1. Price above EMA8.
+2. MACD Trend positive and rising.
+3. MACD Timing positive and rising.
+4. TMO rising.
+5. Squeeze momentum rising.
 
-Setup labels:
+Current states:
 
-- `BREAKOUT`: 0–5% above prior resistance with volume >=1.2x.
-- `READY`: no more than 3% below prior resistance.
-- `TIGHTENING`: 10D/40D range ratio <=0.75 and 10-day range <=12%.
-- `WATCH`: passes score/liquidity filters but is not in a nearer trigger state.
+- **EMERGING:** synchronized ignition no more than 12 bars old, confirmed DI,
+  EMA8/EMA50 spread <=8%, at least three improving energy lanes, and at least
+  one improving MACD lane. This is the default target.
+- **CONTINUATION:** ignition 13–30 bars old with intact structure and confirmed
+  DI. Score is capped at 54, keeping it out of the default list while preserving
+  it for review.
+- **WATCH:** structure or pattern may be interesting, but current confirmation
+  is incomplete. Score is capped at 49. VRTX may fall here while a possible
+  cup-with-handle awaits fresh confirmation.
+- **REJECTED:** score 0 because structure is broken/currently declining, a
+  recent DI cross failed confirmation, ignition is older than 30 bars, the move
+  since ignition exceeds 20%, or EMA separation exceeds 12%.
 
-`NET` on 2026-08-13 is a useful validation example: it is recognized as a
-price/volume breakout by the new model even though its optional legacy grade is B.
-No other prior winner list exists in this repository's tracked history yet.
+This design intentionally rejects stale/current strong-stock false positives.
+CAT, CMI, DE, GE, IR, ITW, NVO, and ROK are rejected on the 2026-08-14 review
+date. MRK is an established continuation; EMR, PFE, PH, and VRTX are watches
+without current multi-lane confirmation. All are excluded by the default score
+threshold.
 
-## Current limitations
+## Historical validation
 
-- This is an end-of-day heuristic, not an intraday entry or execution system.
-- No market-regime, relative-strength benchmark, earnings/news, fundamentals, or
-  event-risk model is included yet.
-- Computed Weinstein stages are a daily approximation when the source database
-  does not contain the stored stage table.
-- The resistance model uses a fixed 20-session window and does not yet detect
-  hand-drawn multi-month bases or adjust thresholds by volatility regime.
-- Thin or stale securities can still require review even after the dollar-volume
-  filter. The output is a research shortlist, not investment advice.
+Chart-research anchors are approximate visual dates, so nearby trading sessions
+are reviewed rather than tuned as exact labels. Confirmed examples include:
 
-## Configuration and tests
+- ETN around 2026-04-13: `EMERGING`.
+- GE around 2026-06-01: `EMERGING`.
+- ITW around 2026-02-02: `EMERGING`, including the observed low-ADX ignition.
+- EMR transitions into a fresh ignition shortly after the approximate 12/29
+  chart anchor (2026-01-05 in the database).
+- HON’s post-6/15 cross fails by 2026-06-23 and is rejected without using future
+  bars in the 6/23 calculation.
 
-Use a different database without changing code:
+ETN around 2026-01-12 and GE around 2025-12-08 do not qualify under the current
+OHLC-derived structure rule on those exact database dates. They remain recorded
+as unresolved validation differences rather than being force-fit.
 
-```bash
-PRICE_BREAKOUT_DB=/path/to/database.db PYTHONPATH=src python3 -m price_breakout_scanner
-```
+## Event-risk limitation
 
-Run tests:
+The current database has no earnings or corporate-event calendar. `event_risk`
+is therefore always `UNKNOWN`. The scanner does not imply that any candidate is
+safe to hold through earnings. Other limitations include no intraday timing,
+benchmark-relative strength, broad-market regime, fundamentals, or news model.
+
+## Tests
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
