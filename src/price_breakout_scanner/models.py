@@ -15,6 +15,9 @@ class Candidate:
     market_state: str
     structure_state: str
     extension_state: str
+    trend_quality_6m_pct: float
+    positive_structure_bars_6m: int
+    deterioration_flags: str | None
     price: float
     resistance: float
     distance_to_resistance_pct: float

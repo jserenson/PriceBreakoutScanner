@@ -1,9 +1,10 @@
-# PriceBreakoutScanner 1.2
+# PriceBreakoutScanner 1.3
 
-PriceBreakoutScanner is a **recent synchronized-ignition detector**. It is not a
-general list of strong stocks. It walks raw end-of-day `price_history` and looks
-for the clustered transition from compression/recovery into a newly confirmed
-bullish move.
+PriceBreakoutScanner is a **bar-by-bar trend-state and synchronized-ignition
+detector**. It walks raw end-of-day `price_history`, evaluates roughly six
+trading months of structure, and looks for the transition from repair into a
+newly confirmed bullish move without confusing an extended or deteriorating
+chart with a fresh setup.
 
 Atlas TradeScore and TradeGrade remain optional comparison columns and do not
 drive default selection. SQLite is opened read-only. The default nightly source
@@ -49,6 +50,12 @@ All signals use data through the selected date—there is no look-ahead.
 - **Bullish structure:** close > EMA20, EMA8 > EMA20, and EMA20 at least 98% of
   EMA50. The scanner records when this structure was most recently restored.
 - **EMA separation:** `(EMA8 / EMA50 - 1) * 100`.
+- **Six-month structure quality:** every one of the latest 126 trading bars is
+  scored for price above EMA8, EMA8 above EMA21, EMA21 above EMA50, and positive
+  one-bar slopes in all three EMAs. The report includes the resulting percentage
+  and the number of fully aligned bars.
+- **Deterioration:** the latest bar is checked separately so a still-positive
+  +DI, TMO, Squeeze, or MACD histogram cannot hide that it has rolled over.
 
 The TMO and Squeeze formulas are documented approximations. They may not exactly
 match proprietary chart implementations, but are stable and testable across the
@@ -65,20 +72,12 @@ bullish structure, and at least four of these five confirmations:
 4. TMO rising.
 5. Squeeze momentum rising.
 
-Current states:
-
-- **EMERGING:** synchronized ignition no more than 12 bars old, confirmed DI,
-  EMA8/EMA50 spread <=8%, at least three improving energy lanes, and at least
-  one improving MACD lane. This is the default target.
-- **CONTINUATION:** ignition 13–30 bars old with intact structure and confirmed
-  DI. Score is capped at 54, keeping it out of the default list while preserving
-  it for review.
-- **WATCH:** structure or pattern may be interesting, but current confirmation
-  is incomplete. Score is capped at 49. VRTX may fall here while a possible
-  cup-with-handle awaits fresh confirmation.
-- **REJECTED:** score 0 because structure is broken/currently declining, a
-  recent DI cross failed confirmation, ignition is older than 30 bars, the move
-  since ignition exceeds 20%, or EMA separation exceeds 12%.
+Current lifecycle states are **REPAIRING**, **PRIMED**, **CONFIRMED**,
+**CONFIRMED_EXTENDED**, **WEAKENING**, and **BROKEN**. Structure and entry risk
+remain separate: a chart may retain excellent EMA structure while being marked
+extended, and a positive DI crossover is downgraded when +DI and its spread roll
+over on the newest bar. Flat EMA ribbons remain repairing rather than receiving
+full trend credit.
 
 This design intentionally rejects stale/current strong-stock false positives.
 CAT, CMI, DE, GE, IR, ITW, NVO, and ROK are rejected on the 2026-08-14 review

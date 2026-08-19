@@ -271,11 +271,20 @@ class BreakoutScanner:
         tmo_slope = indicators.slope(tmo_series, 3)
         trend_slope = indicators.slope(macd_trend, 3)
         timing_slope = indicators.slope(macd_timing, 3)
+        trend_quality_6m, positive_structure_bars = cls._trend_quality_6m(
+            closes, ema8_series, ema20_series, ema50_series
+        )
+        deterioration_flags = cls._deterioration_flags(
+            di_plus, di_spread_series, tmo_series, squeeze_series,
+            macd_trend, macd_timing,
+        )
         structure_state = cls._structure_state(
             closes, ema8_series, ema20_series, ema50_series,
             di_plus, di_minus, adx_series, macd_trend, macd_timing,
             tmo_series, squeeze_series,
         )
+        if structure_state == "INTACT" and trend_quality_6m < 50:
+            structure_state = "REPAIRING"
         extension_state = cls._extension_state(
             price_ema8_distance, price_ema21_distance, price_ema8_atr,
             ema8_series, ema20_series,
@@ -301,26 +310,40 @@ class BreakoutScanner:
             ema8_series, ema20_series, energy_lanes, macd_improving,
             di_plus, di_minus, di_spread_series, adx_series,
         )
+        if ema_spread < 0.75 and ignition_state not in {"REJECTED", "WEAKENING"}:
+            ignition_state = "REPAIRING"
+            rejection_reason = "EMA ribbon is still too flat to confirm an upward structure"
+        if (
+            "DI+ rolled over" in deterioration_flags or len(deterioration_flags) >= 2
+        ) and ignition_state in {"CONFIRMED", "PRIMED"}:
+            ignition_state = "WEAKENING"
+            rejection_reason = "; ".join(deterioration_flags)
         market_state = cls._market_state(
             ignition_state, structure_state, extension_state,
             di_plus, di_minus, di_spread_series, adx_series,
         )
         score = cls._ignition_score(
             ignition_state, bars_since_di_cross, di_cross_confirmed,
-            adx_at_cross, adx_slope, squeeze_slope, squeeze_turn,
+            adx_at_cross, adx_slope, squeeze_series[-1], squeeze_slope, squeeze_turn,
             tmo_series[-1], tmo_slope, macd_trend[-1], trend_slope,
             macd_timing[-1], timing_slope, structure_state != "BROKEN", ema_spread,
             move_since_ignition, bars_since_ignition,
+            trend_quality_6m, deterioration_flags, di_plus[-1], di_minus[-1],
+            di_plus_slope_3, di_spread_slope_3, adx_series[-1], extension_state,
         )
         maturity_penalty = cls._maturity_penalty(
             runup_60, ema_spread, bars_since_reset, ignition_state, volume_ratio
         )
+        score = max(0.0, score - maturity_penalty * 0.5)
         legacy_score, grade = legacy or (None, None)
         return Candidate(
             rank=None, symbol=symbol, company=clean[-1]["company_name"], date=date,
             score=round(score, 2), setup=ignition_state,
             market_state=market_state, structure_state=structure_state,
             extension_state=extension_state, price=round(close, 2),
+            trend_quality_6m_pct=round(trend_quality_6m, 1),
+            positive_structure_bars_6m=positive_structure_bars,
+            deterioration_flags=", ".join(deterioration_flags) or None,
             resistance=round(resistance, 2), distance_to_resistance_pct=round(distance, 2),
             breakout_pct=round(breakout_pct, 2), range_10d_pct=round(range_10, 2),
             tightening_ratio=round(tightening, 3), higher_low_pct=round(higher_low, 2),
@@ -444,6 +467,63 @@ class BreakoutScanner:
         return "FALLING" if slope_3 < 0 else "TURNING_UP"
 
     @staticmethod
+    def _trend_quality_6m(
+        closes: Sequence[float], ema8: Sequence[float], ema21: Sequence[float],
+        ema50: Sequence[float], bars: int = 126,
+    ) -> tuple[float, int]:
+        """Summarize every daily bar in roughly six trading months.
+
+        This deliberately rewards persistent, orderly structure instead of
+        treating the last bar as if it appeared without a history.
+        """
+        start = max(1, len(closes) - bars)
+        samples = range(start, len(closes))
+        aligned = 0
+        points = 0.0
+        count = max(1, len(closes) - start)
+        for index in samples:
+            bar_points = sum(
+                (
+                    closes[index] > ema8[index],
+                    ema8[index] > ema21[index],
+                    ema21[index] > ema50[index],
+                    ema8[index] >= ema8[index - 1],
+                    ema21[index] >= ema21[index - 1],
+                    ema50[index] >= ema50[index - 1],
+                )
+            )
+            points += bar_points / 6
+            if bar_points == 6:
+                aligned += 1
+        return points / count * 100, aligned
+
+    @staticmethod
+    def _deterioration_flags(
+        di_plus: Sequence[float], di_spread: Sequence[float],
+        tmo: Sequence[float], squeeze: Sequence[float],
+        trend: Sequence[float], timing: Sequence[float],
+    ) -> list[str]:
+        """Describe current loss of slope; a positive value alone is not enough."""
+        flags: list[str] = []
+        if indicators.slope(di_plus, 1) < 0 and indicators.slope(di_spread, 1) < 0:
+            flags.append("DI+ rolled over")
+        if indicators.slope(di_plus, 3) <= 0:
+            flags.append("DI+ declining 3d")
+        if indicators.slope(di_spread, 3) <= 0:
+            flags.append("DI spread narrowing")
+        if tmo[-1] <= 0 or indicators.slope(tmo, 3) <= 0:
+            flags.append("TMO weak")
+        if squeeze[-1] <= 0 or indicators.slope(squeeze, 3) <= 0:
+            flags.append("squeeze deteriorating")
+        if trend[-1] <= 0 or indicators.slope(trend, 3) <= 0:
+            flags.append("MACD trend deteriorating")
+        if timing[-1] <= 0 or indicators.slope(timing, 3) <= 0:
+            flags.append("MACD timing deteriorating")
+        elif indicators.slope(timing, 1) < 0:
+            flags.append("MACD timing rolled over")
+        return flags
+
+    @staticmethod
     def _market_state(
         ignition_state: str, structure_state: str, extension_state: str,
         di_plus: Sequence[float], di_minus: Sequence[float],
@@ -453,6 +533,8 @@ class BreakoutScanner:
             return "BROKEN"
         if ignition_state == "WEAKENING":
             return "WEAKENING"
+        if ignition_state == "REPAIRING":
+            return "REPAIRING"
         if extension_state == "EXTENDED":
             return "CONFIRMED_EXTENDED" if structure_state == "INTACT" else "REPAIRING_EXTENDED"
         if structure_state == "REPAIRING":
@@ -547,41 +629,46 @@ class BreakoutScanner:
     @staticmethod
     def _ignition_score(
         state: str, bars_since_cross: int | None, cross_confirmed: bool,
-        adx_at_cross: float | None, adx_slope: float, squeeze_slope: float,
+        adx_at_cross: float | None, adx_slope: float, squeeze: float, squeeze_slope: float,
         squeeze_turn: bool, tmo: float, tmo_slope: float, trend: float,
         trend_slope: float, timing: float, timing_slope: float,
         structure_ok: bool, ema_spread: float, move_since_ignition: float | None,
         bars_since_ignition: int | None,
+        trend_quality_6m: float, deterioration_flags: Sequence[str],
+        di_plus: float, di_minus: float, di_plus_slope: float,
+        di_spread_slope: float, adx: float, extension_state: str,
     ) -> float:
         if state == "REJECTED":
             return 0.0
-        score = 0.0
-        score += {
-            "CONFIRMED": 16,
-            "PRIMED": 13,
-            "REPAIRING": 8,
-            "EXTENDED": 5,
-            "WEAKENING": -10,
-        }.get(state, 0)
+        # The score is intentionally distributed across structure, DI health,
+        # energy confirmation and freshness so no single recent cross can
+        # saturate the ranking.
+        score = 8.0 if structure_ok else -40.0
+        score += min(16.0, trend_quality_6m * 0.16)
+        score += 8 if cross_confirmed else -15
+        score += 5 if di_plus > di_minus else -15
+        score += 4 if di_plus_slope > 0 else -4
+        score += 5 if di_spread_slope > 0 else -5
+        score += 4 if adx_slope > 0 else 2 if adx_slope >= -0.10 else -3
+        score += 3 if adx >= 20 else 2 if adx >= 15 else 1 if adx_slope > 0 else 0
+        score += 6 if squeeze_slope > 0 and squeeze > 0 else -3 if squeeze <= 0 else 0
+        score += 5 if tmo >= 50 and tmo_slope > 0 else 2 if tmo > 0 and tmo_slope > 0 else -5 if tmo <= 0 else 0
+        score += 7 if trend > 0 and trend_slope > 0 else -5 if trend <= 0 else 0
+        score += 7 if timing > 0 and timing_slope > 0 else -5 if timing <= 0 else 0
+        score += {"CONFIRMED": 8, "PRIMED": 6, "REPAIRING": 2,
+                  "EXTENDED": 2, "WEAKENING": -8}.get(state, 0)
         if bars_since_ignition is not None:
-            score += 22 if bars_since_ignition <= 3 else 18 if bars_since_ignition <= 7 else 14 if bars_since_ignition <= 12 else 8
+            score += 6 if bars_since_ignition <= 7 else 4 if bars_since_ignition <= 12 else 1
         if bars_since_cross is not None:
-            score += 10 if bars_since_cross <= 3 else 8 if bars_since_cross <= 7 else 5 if bars_since_cross <= 12 else 0
-        score += 5 if cross_confirmed else -20
-        if adx_at_cross is not None:
-            score += 4 if adx_at_cross < 20 else 3 if adx_at_cross <= 30 else 0 if adx_at_cross <= 40 else -3
-        score += 3 if adx_slope > 0 else 0
-        score += 5 if squeeze_slope > 0 else 0
-        score += 2 if squeeze_turn else 0
-        score += 4 if tmo_slope > 0 else 0
-        score += 2 if -20 <= tmo <= 70 else -2 if tmo > 85 else 0
-        score += 4 if trend > 0 and trend_slope > 0 else 0
-        score += 4 if timing > 0 and timing_slope > 0 else 0
-        score += 2 if trend > 0 and timing > 0 else 0
-        score += 8 if structure_ok else -40
-        score += 6 if ema_spread <= 4 else 4 if ema_spread <= 6 else 0 if ema_spread <= 9 else -6
-        if move_since_ignition is not None:
-            score += 6 if move_since_ignition <= 5 else 3 if move_since_ignition <= 12 else 0 if move_since_ignition <= 20 else -20
+            score += 4 if bars_since_cross <= 7 else 2 if bars_since_cross <= 12 else 0
+        score += 3 if ema_spread <= 6 else 1 if ema_spread <= 9 else -5
+        score -= 4 * len(deterioration_flags)
+        if extension_state == "HUGGING_EMA8":
+            score += 3
+        elif extension_state == "EXTENDED":
+            score -= 10
+        if move_since_ignition is not None and move_since_ignition > 20:
+            score -= 15
         if state == "WEAKENING":
             score = min(score, 49)
         elif state == "REPAIRING":

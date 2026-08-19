@@ -6,10 +6,20 @@ const [dataPath, outputPath, runtimeDirectory] = process.argv.slice(2);
 const requireFromRuntime = createRequire(path.join(runtimeDirectory, "entry.cjs"));
 const { SpreadsheetFile, Workbook } = requireFromRuntime("@oai/artifact-tool");
 const records = JSON.parse(await fs.readFile(dataPath, "utf8"));
+const columnName = (number) => {
+  let result = "";
+  for (let value = number; value > 0; value = Math.floor((value - 1) / 26)) {
+    result = String.fromCharCode(65 + ((value - 1) % 26)) + result;
+  }
+  return result;
+};
 const columns = [
   ["Rank", "rank"], ["Symbol", "symbol"], ["Company", "company"], ["Date", "date"],
   ["Ignition Score", "score"], ["Market State", "market_state"],
   ["Structure State", "structure_state"], ["Extension State", "extension_state"],
+  ["6M Trend Quality %", "trend_quality_6m_pct"],
+  ["Positive Structure Bars 6M", "positive_structure_bars_6m"],
+  ["Deterioration Flags", "deterioration_flags"],
   ["State", "ignition_state"], ["Price", "price"],
   ["Price / EMA8 %", "price_ema8_distance_pct"], ["Price / EMA21 %", "price_ema21_distance_pct"],
   ["Price / EMA50 %", "price_ema50_distance_pct"], ["Price / EMA8 ATR", "price_ema8_distance_atr"],
@@ -53,9 +63,9 @@ if (records.length) {
   table.showBandedRows = true;
   table.showFilterButton = true;
   sheet.getRangeByIndexes(1, 4, records.length, 1).format.numberFormat = "0.00";
-  sheet.getRangeByIndexes(1, 9, records.length, 1).format.numberFormat = "$#,##0.00";
-  sheet.getRangeByIndexes(1, 10, records.length, 3).format.numberFormat = "0.00\"%\"";
-  sheet.getRangeByIndexes(1, 13, records.length, 1).format.numberFormat = "0.00";
+  sheet.getRangeByIndexes(1, 12, records.length, 1).format.numberFormat = "$#,##0.00";
+  sheet.getRangeByIndexes(1, 13, records.length, 3).format.numberFormat = "0.00\"%\"";
+  sheet.getRangeByIndexes(1, 16, records.length, 1).format.numberFormat = "0.00";
   sheet.getRangeByIndexes(1, 4, records.length, 1).conditionalFormats.add("colorScale", {
     thresholds: ["min", "50%", "max"], colors: ["#FECACA", "#FEF3C7", "#BBF7D0"],
   });
@@ -82,6 +92,8 @@ const methodRows = [
   ["DI trajectory", "Track DI+ and DI- slopes over 3 and 5 bars plus widening or narrowing DI spread", "Reject stale crosses whose positive directional pressure has rolled over"],
   ["ADX state", "Classify rising, falling, flattening, or turning up; flattening after decline is constructive during repair", "Avoid requiring already-high ADX before an early move"],
   ["Extension", "Normalize price distance above EMA8 by percent and ATR; also measure price to EMA21/EMA50", "Separate trend quality from entry risk"],
+  ["Six-month bar review", "Score close/EMA8/EMA21/EMA50 alignment and each EMA slope on every one of the last 126 trading bars", "Distinguish durable upward structure from a one-day bullish snapshot"],
+  ["Deterioration flags", "Flag latest-bar DI+ rollover plus 3-bar weakening in DI, TMO, Squeeze, and both MACD histograms", "Do not rank a positive-but-declining indicator as strong"],
   ["Synchronized ignition", "Recent DI cross + restored structure + at least 4 of price above EMA8, MACD Trend, MACD Timing, TMO, and Squeeze improving", "Require clustered confirmation"],
   ["Lifecycle", "BROKEN -> REPAIRING -> PRIMED -> CONFIRMED -> CONFIRMED_EXTENDED -> WEAKENING", "Describe where the chart is, not just whether it passes"],
   ["Hard rejection", "No synchronized repair evidence, failed recent DI cross, or stale ignition", "Remove damaged moves without discarding legitimate repair"],
@@ -100,8 +112,9 @@ methods.getRangeByIndexes(0, 2, methodRows.length, 1).format.columnWidthPx = 600
 methodRange.format.autofitRows();
 
 const errors = await workbook.inspect({ kind: "match", searchTerm: "#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A", options: { useRegex: true, maxResults: 50 }, summary: "formula error scan" });
-const inspection = await workbook.inspect({ kind: "table", range: `Ignition Candidates!A1:AF${rowCount}`, include: "values,formulas", tableMaxRows: 5, tableMaxCols: 32, maxChars: 8000 });
-for (const [sheetName, range] of [["Ignition Candidates", `A1:AF${Math.min(rowCount, 21)}`], ["Methodology", `A1:C${methodRows.length}`]]) {
+const lastColumn = columnName(columnCount);
+const inspection = await workbook.inspect({ kind: "table", range: `Ignition Candidates!A1:${lastColumn}${rowCount}`, include: "values,formulas", tableMaxRows: 5, tableMaxCols: columnCount, maxChars: 8000 });
+for (const [sheetName, range] of [["Ignition Candidates", `A1:${lastColumn}${Math.min(rowCount, 21)}`], ["Methodology", `A1:C${methodRows.length}`]]) {
   const preview = await workbook.render({ sheetName, range, scale: 1, format: "png" });
   await fs.writeFile(path.join(path.dirname(outputPath), `.PriceBreakoutScanner-${sheetName.replaceAll(" ", "-")}.png`), new Uint8Array(await preview.arrayBuffer()));
 }

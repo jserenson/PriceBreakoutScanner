@@ -13,17 +13,17 @@ from .models import Candidate
 
 
 def render_table(candidates: Sequence[Candidate]) -> str:
-    headers = ("#", "Symbol", "Score", "Market", "Structure", "Extension", "Price", "DI+ 3/5", "DI- 3/5", "Spread 3/5", "ADX", "ADX State", "Ignition", "Reason")
+    headers = ("#", "Symbol", "Score", "Market", "Structure", "Extension", "6M Quality", "Price", "DI+ 3/5", "DI- 3/5", "Spread 3/5", "ADX", "ADX State", "Ignition", "Deterioration / Reason")
     rows = [
         (
             item.rank or "-", item.symbol, f"{item.score:.2f}", item.market_state,
-            item.structure_state, item.extension_state, f"{item.price:.2f}",
+            item.structure_state, item.extension_state, f"{item.trend_quality_6m_pct:.1f}%", f"{item.price:.2f}",
             f"{item.di_plus_slope_3d:.2f}/{item.di_plus_slope_5d:.2f}",
             f"{item.di_minus_slope_3d:.2f}/{item.di_minus_slope_5d:.2f}",
             f"{item.di_spread_slope_3d:.2f}/{item.di_spread_slope_5d:.2f}",
             f"{item.adx:.1f}", item.adx_state,
             item.bars_since_ignition if item.bars_since_ignition is not None else "-",
-            item.rejection_reason or "-",
+            item.deterioration_flags or item.rejection_reason or "-",
         )
         for item in candidates
     ]

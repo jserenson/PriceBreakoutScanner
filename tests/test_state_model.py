@@ -44,6 +44,25 @@ class StateModelTests(unittest.TestCase):
             "FLATTENING",
         )
 
+    def test_six_month_quality_rewards_persistent_bar_by_bar_structure(self) -> None:
+        closes = [10 + index * 0.1 for index in range(130)]
+        ema8 = [value - 0.1 for value in closes]
+        ema21 = [value - 0.2 for value in closes]
+        ema50 = [value - 0.3 for value in closes]
+        quality, aligned = BreakoutScanner._trend_quality_6m(
+            closes, ema8, ema21, ema50
+        )
+        self.assertEqual(quality, 100.0)
+        self.assertEqual(aligned, 126)
+
+    def test_latest_di_rollover_is_reported_even_when_three_day_slope_is_positive(self) -> None:
+        flags = BreakoutScanner._deterioration_flags(
+            [20, 21, 24, 23], [3, 4, 7, 6],
+            [1, 2, 3, 4], [1, 2, 3, 4],
+            [1, 2, 3, 4], [1, 2, 3, 4],
+        )
+        self.assertIn("DI+ rolled over", flags)
+
 
 if __name__ == "__main__":
     unittest.main()

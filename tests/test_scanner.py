@@ -138,6 +138,8 @@ class BreakoutScannerTests(unittest.TestCase):
         self.assertEqual(rows[0]["symbol"], "NET")
         self.assertIn("tightening_ratio", rows[0])
         self.assertIn("bars_since_ignition", rows[0])
+        self.assertIn("trend_quality_6m_pct", rows[0])
+        self.assertIn("deterioration_flags", rows[0])
         self.assertIn("event_risk", rows[0])
 
     def test_missing_database_has_clear_error(self) -> None:
