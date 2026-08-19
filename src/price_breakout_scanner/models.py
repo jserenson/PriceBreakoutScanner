@@ -12,6 +12,9 @@ class Candidate:
     date: str
     score: float
     setup: str
+    market_state: str
+    structure_state: str
+    extension_state: str
     price: float
     resistance: float
     distance_to_resistance_pct: float
@@ -26,6 +29,11 @@ class Candidate:
     extension_20d_pct: float
     runup_60d_pct: float
     ema8_ema50_spread_pct: float
+    price_ema8_distance_pct: float
+    price_ema21_distance_pct: float
+    price_ema50_distance_pct: float
+    price_ema8_distance_atr: float
+    ema8_ema21_spread_pct: float
     bars_since_reset: int | None
     maturity_penalty: float
     ignition_state: str
@@ -33,8 +41,16 @@ class Candidate:
     di_cross_confirmed: bool
     di_plus: float
     di_minus: float
+    di_plus_slope_3d: float
+    di_plus_slope_5d: float
+    di_minus_slope_3d: float
+    di_minus_slope_5d: float
+    di_spread: float
+    di_spread_slope_3d: float
+    di_spread_slope_5d: float
     adx: float
     adx_slope_5d: float
+    adx_state: str
     adx_at_cross: float | None
     squeeze_momentum: float
     squeeze_slope_3d: float

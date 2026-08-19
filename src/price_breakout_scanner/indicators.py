@@ -60,6 +60,29 @@ def dmi_adx(
     return di_plus, di_minus, _wilder(dx, period)
 
 
+def average_true_range(
+    highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], period: int = 14
+) -> list[float]:
+    """Wilder average true range, aligned one-for-one with the input bars."""
+    true_ranges = [float(highs[0]) - float(lows[0])]
+    for index in range(1, len(closes)):
+        true_ranges.append(
+            max(
+                float(highs[index]) - float(lows[index]),
+                abs(float(highs[index]) - float(closes[index - 1])),
+                abs(float(lows[index]) - float(closes[index - 1])),
+            )
+        )
+    return _wilder(true_ranges, period)
+
+
+def count_declines(values: Sequence[float], bars: int = 3, index: int = -1) -> int:
+    """Count falling one-bar changes in the trailing window."""
+    resolved = index if index >= 0 else len(values) + index
+    start = max(1, resolved - bars + 1)
+    return sum(values[position] < values[position - 1] for position in range(start, resolved + 1))
+
+
 def true_momentum(closes: Sequence[float], lookback: int = 14) -> list[float]:
     """TMO approximation: smoothed sum of 14 pairwise close comparisons."""
     raw: list[float] = []

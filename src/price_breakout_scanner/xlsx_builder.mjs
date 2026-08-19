@@ -8,11 +8,21 @@ const { SpreadsheetFile, Workbook } = requireFromRuntime("@oai/artifact-tool");
 const records = JSON.parse(await fs.readFile(dataPath, "utf8"));
 const columns = [
   ["Rank", "rank"], ["Symbol", "symbol"], ["Company", "company"], ["Date", "date"],
-  ["Ignition Score", "score"], ["State", "ignition_state"], ["Price", "price"],
+  ["Ignition Score", "score"], ["Market State", "market_state"],
+  ["Structure State", "structure_state"], ["Extension State", "extension_state"],
+  ["State", "ignition_state"], ["Price", "price"],
+  ["Price / EMA8 %", "price_ema8_distance_pct"], ["Price / EMA21 %", "price_ema21_distance_pct"],
+  ["Price / EMA50 %", "price_ema50_distance_pct"], ["Price / EMA8 ATR", "price_ema8_distance_atr"],
+  ["EMA8 / EMA21 %", "ema8_ema21_spread_pct"],
   ["Bars Since Ignition", "bars_since_ignition"], ["Move Since Ignition %", "move_since_ignition_pct"],
   ["Bars Since DI+ Cross", "bars_since_di_cross"], ["DI Cross Confirmed", "di_cross_confirmed"],
   ["DI+", "di_plus"], ["DI-", "di_minus"], ["ADX at Cross", "adx_at_cross"],
+  ["DI+ Slope 3D", "di_plus_slope_3d"], ["DI+ Slope 5D", "di_plus_slope_5d"],
+  ["DI- Slope 3D", "di_minus_slope_3d"], ["DI- Slope 5D", "di_minus_slope_5d"],
+  ["DI Spread", "di_spread"], ["DI Spread Slope 3D", "di_spread_slope_3d"],
+  ["DI Spread Slope 5D", "di_spread_slope_5d"],
   ["ADX Current", "adx"], ["ADX Slope 5D", "adx_slope_5d"],
+  ["ADX State", "adx_state"],
   ["Squeeze Momentum", "squeeze_momentum"], ["Squeeze Slope 3D", "squeeze_slope_3d"],
   ["Squeeze Recent Turn", "squeeze_recent_turn"], ["TMO", "tmo"], ["TMO Slope 3D", "tmo_slope_3d"],
   ["MACD Trend Hist", "macd_trend_hist"], ["MACD Trend Slope 3D", "macd_trend_slope_3d"],
@@ -43,12 +53,9 @@ if (records.length) {
   table.showBandedRows = true;
   table.showFilterButton = true;
   sheet.getRangeByIndexes(1, 4, records.length, 1).format.numberFormat = "0.00";
-  sheet.getRangeByIndexes(1, 6, records.length, 1).format.numberFormat = "$#,##0.00";
-  sheet.getRangeByIndexes(1, 8, records.length, 1).format.numberFormat = "0.00\"%\"";
-  sheet.getRangeByIndexes(1, 11, records.length, 14).format.numberFormat = "0.00";
-  sheet.getRangeByIndexes(1, 26, records.length, 1).format.numberFormat = "0.00\"%\"";
-  sheet.getRangeByIndexes(1, 29, records.length, 1).format.numberFormat = "$#,##0";
-  sheet.getRangeByIndexes(1, 30, records.length, 1).format.numberFormat = "0.00";
+  sheet.getRangeByIndexes(1, 9, records.length, 1).format.numberFormat = "$#,##0.00";
+  sheet.getRangeByIndexes(1, 10, records.length, 3).format.numberFormat = "0.00\"%\"";
+  sheet.getRangeByIndexes(1, 13, records.length, 1).format.numberFormat = "0.00";
   sheet.getRangeByIndexes(1, 4, records.length, 1).conditionalFormats.add("colorScale", {
     thresholds: ["min", "50%", "max"], colors: ["#FECACA", "#FEF3C7", "#BBF7D0"],
   });
@@ -70,12 +77,14 @@ const methodRows = [
   ["TMO approximation", "Double-smoothed 14 pairwise close comparisons, scaled -100 to +100", "Direction and position of short-cycle momentum"],
   ["MACD Trend", "12/26/9 histogram and 3-bar slope", "Persistent trend energy"],
   ["MACD Timing", "5/13/4 histogram and 3-bar slope", "Faster ignition confirmation"],
-  ["Structure restored", "Close>EMA20, EMA8>EMA20, and EMA20 >=98% of EMA50", "Identify return of bullish price structure"],
+  ["Intact structure", "Close>EMA8>EMA21>=EMA50 with rising EMA21 and EMA50", "Identify an established bullish ribbon"],
+  ["Repairing structure", "Score synchronized recovery evidence across price/EMA alignment, DI slopes, ADX flattening, TMO, both MACDs, and squeeze momentum", "Recognize DX-like repair instead of rejecting it through a Boolean gate"],
+  ["DI trajectory", "Track DI+ and DI- slopes over 3 and 5 bars plus widening or narrowing DI spread", "Reject stale crosses whose positive directional pressure has rolled over"],
+  ["ADX state", "Classify rising, falling, flattening, or turning up; flattening after decline is constructive during repair", "Avoid requiring already-high ADX before an early move"],
+  ["Extension", "Normalize price distance above EMA8 by percent and ATR; also measure price to EMA21/EMA50", "Separate trend quality from entry risk"],
   ["Synchronized ignition", "Recent DI cross + restored structure + at least 4 of price above EMA8, MACD Trend, MACD Timing, TMO, and Squeeze improving", "Require clustered confirmation"],
-  ["EMERGING", "Ignition <=12 bars, confirmed DI, EMA spread <=8%, >=3 improving energy lanes, and improving MACD", "Default recent-ignition target"],
-  ["CONTINUATION", "Ignition 13-30 bars and structure intact; score capped at 54", "Separate established moves from default emerging list"],
-  ["WATCH", "Potential pattern without current multi-lane confirmation; score capped at 49", "Possible handle or transition awaiting ignition"],
-  ["Hard rejection", "Broken/down structure, failed DI cross, ignition >30 bars, move >20%, or EMA spread >12%", "Remove stale, completed, or damaged moves"],
+  ["Lifecycle", "BROKEN -> REPAIRING -> PRIMED -> CONFIRMED -> CONFIRMED_EXTENDED -> WEAKENING", "Describe where the chart is, not just whether it passes"],
+  ["Hard rejection", "No synchronized repair evidence, failed recent DI cross, or stale ignition", "Remove damaged moves without discarding legitimate repair"],
   ["Event risk", "UNKNOWN: source database has no earnings/event calendar", "Never imply unavailable event safety"],
   ["Limitations", "End-of-day approximations may differ from proprietary chart formulas; no intraday, relative-strength, regime, or earnings model", "Defines appropriate review use"],
 ];

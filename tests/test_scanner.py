@@ -80,11 +80,12 @@ class BreakoutScannerTests(unittest.TestCase):
         self.assertFalse(sessions[0][2])
         self.assertTrue(sessions[1][2])
 
-    def test_recent_synchronized_ignition_is_found_without_legacy_grade_filter(self) -> None:
+    def test_recent_synchronized_ignition_tracks_extension_without_legacy_grade_filter(self) -> None:
         date_value, candidates = self.scanner.scan(min_score=0, symbols=["NET"])
         self.assertEqual(date_value, self.latest)
         self.assertEqual(candidates[0].symbol, "NET")
-        self.assertEqual(candidates[0].ignition_state, "EMERGING")
+        self.assertEqual(candidates[0].ignition_state, "EXTENDED")
+        self.assertEqual(candidates[0].extension_state, "EXTENDED")
         self.assertLessEqual(candidates[0].bars_since_di_cross, 5)
         self.assertTrue(candidates[0].di_cross_confirmed)
         self.assertIsNotNone(candidates[0].bars_since_ignition)

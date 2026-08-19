@@ -13,19 +13,16 @@ from .models import Candidate
 
 
 def render_table(candidates: Sequence[Candidate]) -> str:
-    headers = ("#", "Symbol", "Score", "State", "Price", "DI Cross", "DI OK", "ADX@X", "ADX Slp", "Ignition", "Move", "EMA Gap", "TMO Slp", "SQZ Slp", "MACD T/T", "Reason")
+    headers = ("#", "Symbol", "Score", "Market", "Structure", "Extension", "Price", "DI+ 3/5", "DI- 3/5", "Spread 3/5", "ADX", "ADX State", "Ignition", "Reason")
     rows = [
         (
-            item.rank or "-", item.symbol, f"{item.score:.2f}", item.ignition_state,
-            f"{item.price:.2f}", item.bars_since_di_cross if item.bars_since_di_cross is not None else "-",
-            "yes" if item.di_cross_confirmed else "no",
-            f"{item.adx_at_cross:.1f}" if item.adx_at_cross is not None else "-",
-            f"{item.adx_slope_5d:.2f}",
+            item.rank or "-", item.symbol, f"{item.score:.2f}", item.market_state,
+            item.structure_state, item.extension_state, f"{item.price:.2f}",
+            f"{item.di_plus_slope_3d:.2f}/{item.di_plus_slope_5d:.2f}",
+            f"{item.di_minus_slope_3d:.2f}/{item.di_minus_slope_5d:.2f}",
+            f"{item.di_spread_slope_3d:.2f}/{item.di_spread_slope_5d:.2f}",
+            f"{item.adx:.1f}", item.adx_state,
             item.bars_since_ignition if item.bars_since_ignition is not None else "-",
-            f"{item.move_since_ignition_pct:.1f}%" if item.move_since_ignition_pct is not None else "-",
-            f"{item.ema8_ema50_spread_pct:.1f}%", f"{item.tmo_slope_3d:.2f}",
-            f"{item.squeeze_slope_3d:.2f}",
-            f"{item.macd_trend_slope_3d:.2f}/{item.macd_timing_slope_3d:.2f}",
             item.rejection_reason or "-",
         )
         for item in candidates
