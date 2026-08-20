@@ -54,6 +54,19 @@ class PilotStudyTests(unittest.TestCase):
         self.assertEqual(events[0].hit_5pct_date, "2026-01-04")
         self.assertEqual(events[0].first_5pct_outcome, "TARGET_FIRST")
         self.assertEqual(events[0].outcome_status, "COMPLETE")
+        self.assertEqual(events[0].weinstein_stage, "UNKNOWN")
+        self.assertEqual(events[0].entry_classification, "INSUFFICIENT_WEEKLY_HISTORY")
+
+    def test_entry_classification_uses_stage_and_price_extension_only(self) -> None:
+        early = ("EARLY_STAGE2", 100.0, 1.0, 12.0)
+        extended = ("STAGE2_EXTENDED", 100.0, 4.0, 28.0)
+        stage4 = ("STAGE4", 100.0, -3.0, -5.0)
+        self.assertEqual(
+            PilotStudy._entry_classification(early, 2.0, 20.0),
+            "EARLY_STAGE2_CANDIDATE",
+        )
+        self.assertEqual(PilotStudy._entry_classification(extended, 2.0, 10.0), "EXTENDED")
+        self.assertEqual(PilotStudy._entry_classification(stage4, 2.0, 10.0), "REJECT_STAGE")
 
 
 if __name__ == "__main__":

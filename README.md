@@ -118,6 +118,11 @@ The source database remains read-only. The latest event can be marked `OPEN`
 when 20 future sessions do not yet exist and is excluded from completed-event
 conclusions.
 
+The pilot also derives a no-look-ahead Weinstein regime from weekly closes and
+the 30-week moving average. Entry classification uses that regime plus price
+extension and the stored indicator values. `Stage5Active` is deliberately not
+used to identify or validate entries.
+
 ## Event-risk limitation
 
 The current database has no earnings or corporate-event calendar. `event_risk`

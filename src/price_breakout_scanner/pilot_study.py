@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import csv
 import sqlite3
+from collections import OrderedDict
 from dataclasses import asdict, dataclass
+from datetime import date
 from pathlib import Path
 
 from .cli import DEFAULT_DATABASE
@@ -21,6 +23,12 @@ class PilotEvent:
     adx: float
     timing_hist: float
     timing_slope_5d: float
+    weinstein_stage: str
+    weekly_ma30: float | None
+    weekly_ma30_slope_5w_pct: float | None
+    price_vs_weekly_ma30_pct: float | None
+    runup_20d_pct: float
+    entry_classification: str
     outcome_status: str
     return_5d_pct: float | None
     return_10d_pct: float | None
@@ -36,10 +44,9 @@ class PilotEvent:
 class PilotStudy:
     """Historical proof-of-concept for one mechanically defined setup.
 
-    The prototype describes early bullish acceleration close to EMA8: bullish
-    structure, EMA8 at/above EMA21, DI+ above DI- and rising, positive and
-    rising MACD timing, with price no more than 4% above EMA8. Consecutive
-    qualifying bars form one event, and a cooldown avoids near-duplicates.
+    Candidate timing remains intentionally broad. Each event is then classified
+    using a weekly Weinstein regime and extension derived only from price
+    history and independently calculated indicators.
     """
 
     REQUIRED_ANALYSIS_COLUMNS = {
@@ -80,6 +87,7 @@ class PilotStudy:
             raise ValueError(f"No analysis and price history found for {symbol}")
 
         bar_index = {str(row["date"]): index for index, row in enumerate(bars)}
+        weekly_regimes = self._weekly_regimes(bars)
         events: list[PilotEvent] = []
         previous_qualified = False
         last_event_bar = -cooldown - 1
@@ -88,7 +96,9 @@ class PilotStudy:
             index = bar_index.get(str(row["date"]))
             is_new_episode = qualified and not previous_qualified
             if index is not None and is_new_episode and index - last_event_bar > cooldown:
-                events.append(self._measure(symbol, row, bars, index))
+                events.append(self._measure(
+                    symbol, row, bars, index, weekly_regimes.get(str(row["date"])),
+                ))
                 last_event_bar = index
             previous_qualified = qualified
         return events
@@ -108,6 +118,62 @@ class PilotStudy:
         missing = self.REQUIRED_ANALYSIS_COLUMNS - columns
         if missing:
             raise ValueError("symbol_analysis is missing: " + ", ".join(sorted(missing)))
+
+    @staticmethod
+    def _weekly_regimes(bars: list[sqlite3.Row]) -> dict[str, tuple[str, float, float, float]]:
+        """Calculate a no-look-ahead 30-week regime for every daily bar."""
+        weeks: OrderedDict[tuple[int, int], tuple[str, float]] = OrderedDict()
+        result: dict[str, tuple[str, float, float, float]] = {}
+        stage2_start_week: tuple[int, int] | None = None
+        for bar in bars:
+            day = date.fromisoformat(str(bar["date"]))
+            iso = day.isocalendar()
+            week_key = (iso.year, iso.week)
+            weeks[week_key] = (str(bar["date"]), float(bar["close"]))
+            weekly_values = list(weeks.values())
+            closes = [value[1] for value in weekly_values]
+            if len(closes) < 35:
+                continue
+            ma30 = sum(closes[-30:]) / 30.0
+            ma30_five_weeks_ago = sum(closes[-35:-5]) / 30.0
+            slope = 100.0 * (ma30 / ma30_five_weeks_ago - 1.0)
+            distance = 100.0 * (float(bar["close"]) / ma30 - 1.0)
+
+            raw_stage2 = distance > 2.0 and slope > 0.0
+            if raw_stage2 and stage2_start_week is None:
+                stage2_start_week = week_key
+            elif not raw_stage2:
+                stage2_start_week = None
+
+            if distance < -2.0 and slope < -1.0:
+                stage = "STAGE4"
+            elif raw_stage2:
+                stage = "EARLY_STAGE2" if distance <= 20.0 else "STAGE2_EXTENDED"
+            elif distance >= 0.0 and slope >= -1.0:
+                stage = "STAGE1_TO_2"
+            elif abs(distance) <= 10.0 and abs(slope) <= 1.5:
+                stage = "STAGE1"
+            elif distance >= 0.0 and slope < 0.0:
+                stage = "STAGE3"
+            else:
+                stage = "UNFAVORABLE"
+            result[str(bar["date"])] = (stage, ma30, slope, distance)
+        return result
+
+    @staticmethod
+    def _entry_classification(
+        regime: tuple[str, float, float, float] | None,
+        price_vs_ema8: float,
+        runup_20d: float,
+    ) -> str:
+        if regime is None:
+            return "INSUFFICIENT_WEEKLY_HISTORY"
+        stage, _, _, weekly_extension = regime
+        if stage not in {"STAGE1_TO_2", "EARLY_STAGE2"}:
+            return "REJECT_STAGE" if stage != "STAGE2_EXTENDED" else "EXTENDED"
+        if weekly_extension > 20.0 or price_vs_ema8 > 6.0 or runup_20d > 25.0:
+            return "EXTENDED"
+        return "TRANSITION_CANDIDATE" if stage == "STAGE1_TO_2" else "EARLY_STAGE2_CANDIDATE"
 
     @staticmethod
     def _qualifies(row: sqlite3.Row) -> bool:
@@ -130,9 +196,14 @@ class PilotStudy:
 
     @staticmethod
     def _measure(
-        symbol: str, signal: sqlite3.Row, bars: list[sqlite3.Row], index: int
+        symbol: str, signal: sqlite3.Row, bars: list[sqlite3.Row], index: int,
+        regime: tuple[str, float, float, float] | None,
     ) -> PilotEvent:
         entry = float(signal["Close"])
+        price_vs_ema8 = 100.0 * (entry / float(signal["EMA8"]) - 1.0)
+        prior_20 = [float(bar["low"]) for bar in bars[max(0, index - 19):index + 1]
+                    if bar["low"] is not None]
+        runup_20d = 100.0 * (entry / min(prior_20) - 1.0) if prior_20 else 0.0
         future = bars[index + 1:index + 1 + PilotStudy.HORIZON]
 
         def close_return(day: int) -> float | None:
@@ -168,17 +239,32 @@ class PilotStudy:
             first_outcome = "NEITHER"
 
         complete = len(future) >= PilotStudy.HORIZON
+        weekly_stage, weekly_ma, weekly_slope, weekly_distance = regime or (
+            "UNKNOWN", None, None, None,
+        )
         return PilotEvent(
             symbol=symbol,
             signal_date=str(signal["date"]),
             entry_close=round(entry, 4),
-            price_vs_ema8_pct=round(100.0 * (entry / float(signal["EMA8"]) - 1.0), 2),
+            price_vs_ema8_pct=round(price_vs_ema8, 2),
             di_plus=round(float(signal["DIPlus"]), 2),
             di_minus=round(float(signal["DIMinus"]), 2),
             di_plus_slope_5d=round(float(signal["DIPlus_Slope_5D"]), 3),
             adx=round(float(signal["ADX"]), 2) if signal["ADX"] is not None else 0.0,
             timing_hist=round(float(signal["MACDTimingHist"]), 4),
             timing_slope_5d=round(float(signal["MACDTimingHist_Slope_5D"]), 4),
+            weinstein_stage=weekly_stage,
+            weekly_ma30=round(weekly_ma, 4) if weekly_ma is not None else None,
+            weekly_ma30_slope_5w_pct=(
+                round(weekly_slope, 2) if weekly_slope is not None else None
+            ),
+            price_vs_weekly_ma30_pct=(
+                round(weekly_distance, 2) if weekly_distance is not None else None
+            ),
+            runup_20d_pct=round(runup_20d, 2),
+            entry_classification=PilotStudy._entry_classification(
+                regime, price_vs_ema8, runup_20d,
+            ),
             outcome_status="COMPLETE" if complete else "OPEN",
             return_5d_pct=close_return(5),
             return_10d_pct=close_return(10),
