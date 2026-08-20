@@ -102,6 +102,22 @@ ETN around 2026-01-12 and GE around 2025-12-08 do not qualify under the current
 OHLC-derived structure rule on those exact database dates. They remain recorded
 as unresolved validation differences rather than being force-fit.
 
+### One-symbol outcome pilot
+
+Before turning visual chart observations into elimination rules, run the
+mechanical early-ignition pilot on one symbol. It records only the first day of
+each qualifying episode, then measures 5/10/20-session returns, maximum
+favorable and adverse excursion, and whether +5%, +10%, or -5% was reached.
+
+```bash
+PYTHONPATH=src python3 -m price_breakout_scanner.pilot_study \
+  --symbol WTI --output reports/WTI-pilot-events.csv
+```
+
+The source database remains read-only. The latest event can be marked `OPEN`
+when 20 future sessions do not yet exist and is excluded from completed-event
+conclusions.
+
 ## Event-risk limitation
 
 The current database has no earnings or corporate-event calendar. `event_risk`
