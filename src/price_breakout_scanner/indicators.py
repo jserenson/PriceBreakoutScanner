@@ -95,6 +95,18 @@ def true_momentum(closes: Sequence[float], lookback: int = 14) -> list[float]:
     return ema(ema(raw, 5), 3)
 
 
+def chart_tmo(
+    closes: Sequence[float], length: int = 14, smooth: int = 5, signal: int = 3,
+) -> tuple[list[float], list[float]]:
+    """Match the project's ThinkScript TMO: close-close[length], EMA twice, then signal."""
+    data = [
+        float(close) - float(closes[index - length]) if index >= length else 0.0
+        for index, close in enumerate(closes)
+    ]
+    main = ema(ema(data, smooth), smooth)
+    return main, ema(main, signal)
+
+
 def squeeze_momentum(
     highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], period: int = 20
 ) -> list[float]:
@@ -109,6 +121,53 @@ def squeeze_momentum(
         values = [float(close) - midpoint for close in closes[start : index + 1]]
         result[index] = _linear_regression_endpoint(values)
     return result
+
+
+def clean_squeeze_v2(
+    highs: Sequence[float], lows: Sequence[float], closes: Sequence[float],
+    length: int = 21, sd_multiplier: float = 2.0, atr_multiplier: float = 1.5,
+) -> tuple[list[float], list[bool], list[int]]:
+    """Match the supplied cleanSqueezeAndMomentum_v2 ThinkScript."""
+    close_ema = ema(closes, length)
+    momentum = [0.0] * len(closes)
+    squeeze_on = [False] * len(closes)
+    squeeze_count = [0] * len(closes)
+    true_ranges = [float(highs[0]) - float(lows[0])]
+    for index in range(1, len(closes)):
+        true_ranges.append(max(
+            float(highs[index]) - float(lows[index]),
+            abs(float(highs[index]) - float(closes[index - 1])),
+            abs(float(lows[index]) - float(closes[index - 1])),
+        ))
+    for index in range(length - 1, len(closes)):
+        start = index - length + 1
+        close_window = [float(value) for value in closes[start:index + 1]]
+        highest = max(float(value) for value in highs[start:index + 1])
+        lowest = min(float(value) for value in lows[start:index + 1])
+        k_value = (highest + lowest) / 2.0 + close_ema[index]
+        residuals = [
+            float(closes[position]) - (
+                (max(float(value) for value in highs[position - length + 1:position + 1])
+                 + min(float(value) for value in lows[position - length + 1:position + 1]))
+                / 2.0 + close_ema[position]
+            ) / 2.0
+            for position in range(start, index + 1)
+            if position >= length - 1
+        ]
+        # ThinkScript Inertia uses the available length-bar residual series.
+        if len(residuals) == length:
+            momentum[index] = _linear_regression_endpoint(residuals)
+        elif residuals:
+            momentum[index] = _linear_regression_endpoint(residuals)
+        average = sum(close_window) / length
+        variance = sum((value - average) ** 2 for value in close_window) / length
+        sd = math.sqrt(variance)
+        atr = sum(true_ranges[start:index + 1]) / length
+        squeeze_on[index] = average + sd_multiplier * sd < average + atr_multiplier * atr
+        squeeze_count[index] = (
+            squeeze_count[index - 1] + 1 if squeeze_on[index] else 0
+        )
+    return momentum, squeeze_on, squeeze_count
 
 
 def bars_since_cross(positive: Sequence[float], negative: Sequence[float], limit: int = 60) -> int | None:

@@ -7,8 +7,10 @@ from collections import OrderedDict
 from dataclasses import asdict, dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from .cli import DEFAULT_DATABASE
+from . import indicators
 
 
 @dataclass(frozen=True)
@@ -21,8 +23,18 @@ class PilotEvent:
     di_minus: float
     di_plus_slope_5d: float
     adx: float
+    trend_hist: float
+    trend_hist_pct_of_price: float
     timing_hist: float
     timing_slope_5d: float
+    di_plus_change_1d: float
+    timing_hist_change_1d: float
+    tmo: float
+    tmo_signal: float
+    tmo_change_1d: float
+    entry_trigger: str
+    numeric_structure_state: str
+    consecutive_structure_bars: int
     weinstein_stage: str
     weekly_ma30: float | None
     weekly_ma30_slope_5w_pct: float | None
@@ -49,10 +61,8 @@ class PilotStudy:
     history and independently calculated indicators.
     """
 
-    REQUIRED_ANALYSIS_COLUMNS = {
-        "symbol_id", "date", "BullishStructure", "DIPlus", "DIMinus", "ADX",
-        "Close", "EMA8", "EMA21", "MACDTimingHist", "DIPlus_Slope_5D",
-        "MACDTimingHist_Slope_5D",
+    REQUIRED_PRICE_COLUMNS = {
+        "symbol_id", "date", "open", "high", "low", "close", "volume",
     }
     HORIZON = 20
 
@@ -65,42 +75,43 @@ class PilotStudy:
         symbol = symbol.upper().strip()
         with self._connect() as connection:
             self._validate(connection)
-            rows = connection.execute(
-                """
-                SELECT sa.date, sa.Close, sa.EMA8, sa.EMA21, sa.DIPlus,
-                       sa.DIMinus, sa.ADX, sa.DIPlus_Slope_5D,
-                       sa.MACDTimingHist, sa.MACDTimingHist_Slope_5D,
-                       sa.BullishStructure
-                FROM symbol_analysis sa
-                JOIN symbols s ON s.id = sa.symbol_id
-                WHERE UPPER(s.symbol) = ? ORDER BY sa.date
-                """, (symbol,),
-            ).fetchall()
             bars = connection.execute(
                 """
-                SELECT ph.date, ph.high, ph.low, ph.close
+                SELECT ph.date, ph.open, ph.high, ph.low, ph.close, ph.volume
                 FROM price_history ph JOIN symbols s ON s.id = ph.symbol_id
                 WHERE UPPER(s.symbol) = ? ORDER BY ph.date
                 """, (symbol,),
             ).fetchall()
-        if not rows or not bars:
-            raise ValueError(f"No analysis and price history found for {symbol}")
+        if not bars:
+            raise ValueError(f"No price history found for {symbol}")
 
+        rows = self._calculate_indicators(bars)
         bar_index = {str(row["date"]): index for index, row in enumerate(bars)}
         weekly_regimes = self._weekly_regimes(bars)
         events: list[PilotEvent] = []
         previous_qualified = False
         last_event_bar = -cooldown - 1
+        previous_row: dict[str, Any] | None = None
+        consecutive_structure_bars = 0
         for row in rows:
-            qualified = self._qualifies(row)
+            if self._numeric_structure_ok(row):
+                consecutive_structure_bars += 1
+            else:
+                consecutive_structure_bars = 0
+            structure_state = self._structure_state(consecutive_structure_bars)
+            trigger = self._entry_trigger(row, previous_row, structure_state)
+            qualified = trigger is not None
             index = bar_index.get(str(row["date"]))
             is_new_episode = qualified and not previous_qualified
             if index is not None and is_new_episode and index - last_event_bar > cooldown:
                 events.append(self._measure(
-                    symbol, row, bars, index, weekly_regimes.get(str(row["date"])),
+                    symbol, row, previous_row, bars, index,
+                    weekly_regimes.get(str(row["date"])), trigger,
+                    structure_state, consecutive_structure_bars,
                 ))
                 last_event_bar = index
             previous_qualified = qualified
+            previous_row = row
         return events
 
     def _connect(self) -> sqlite3.Connection:
@@ -113,11 +124,48 @@ class PilotStudy:
 
     def _validate(self, connection: sqlite3.Connection) -> None:
         columns = {
-            str(row[1]) for row in connection.execute("PRAGMA table_info(symbol_analysis)")
+            str(row[1]) for row in connection.execute("PRAGMA table_info(price_history)")
         }
-        missing = self.REQUIRED_ANALYSIS_COLUMNS - columns
+        missing = self.REQUIRED_PRICE_COLUMNS - columns
         if missing:
-            raise ValueError("symbol_analysis is missing: " + ", ".join(sorted(missing)))
+            raise ValueError("price_history is missing: " + ", ".join(sorted(missing)))
+
+    @staticmethod
+    def _calculate_indicators(bars: list[sqlite3.Row]) -> list[dict[str, Any]]:
+        """Build every pilot input independently from raw price-history OHLCV."""
+        clean = [bar for bar in bars if all(bar[name] is not None for name in ("high", "low", "close"))]
+        highs = [float(bar["high"]) for bar in clean]
+        lows = [float(bar["low"]) for bar in clean]
+        closes = [float(bar["close"]) for bar in clean]
+        ema8 = indicators.ema(closes, 8)
+        ema21 = indicators.ema(closes, 21)
+        ema50 = indicators.ema(closes, 50)
+        di_plus, di_minus, adx = indicators.dmi_adx(highs, lows, closes, 14)
+        # Match the chart study parameters, while calculating them locally.
+        trend = indicators.macd_histogram(closes, 24, 52, 9)
+        timing = indicators.macd_histogram(closes, 3, 10, 16)
+        tmo, tmo_signal = indicators.chart_tmo(closes, 14, 5, 3)
+        squeeze_momentum, squeeze_on, squeeze_count = indicators.clean_squeeze_v2(
+            highs, lows, closes, 21, 2.0, 1.5,
+        )
+
+        rows: list[dict[str, Any]] = []
+        for index, bar in enumerate(clean):
+            rows.append({
+                "date": str(bar["date"]), "Close": closes[index],
+                "EMA8": ema8[index], "EMA21": ema21[index], "EMA50": ema50[index],
+                "EMA8Slope": indicators.slope(ema8, 5, index),
+                "EMA21Slope": indicators.slope(ema21, 5, index),
+                "DIPlus": di_plus[index], "DIMinus": di_minus[index], "ADX": adx[index],
+                "DIPlus_Slope_5D": indicators.slope(di_plus, 5, index),
+                "MACDTrendHist": trend[index], "MACDTimingHist": timing[index],
+                "MACDTimingHist_Slope_5D": indicators.slope(timing, 5, index),
+                "TMO": tmo[index], "TMOSignal": tmo_signal[index],
+                "SqueezeReleased": index > 0 and squeeze_on[index - 1] and not squeeze_on[index],
+                "SqueezeMomentum": squeeze_momentum[index], "SqueezeOn": squeeze_on[index],
+                "SqueezeCount": squeeze_count[index],
+            })
+        return rows
 
     @staticmethod
     def _weekly_regimes(bars: list[sqlite3.Row]) -> dict[str, tuple[str, float, float, float]]:
@@ -165,39 +213,95 @@ class PilotStudy:
         regime: tuple[str, float, float, float] | None,
         price_vs_ema8: float,
         runup_20d: float,
+        entry_trigger: str = "BASE_TRANSITION",
     ) -> str:
         if regime is None:
             return "INSUFFICIENT_WEEKLY_HISTORY"
         stage, _, _, weekly_extension = regime
         if stage not in {"STAGE1_TO_2", "EARLY_STAGE2"}:
             return "REJECT_STAGE" if stage != "STAGE2_EXTENDED" else "EXTENDED"
+        if entry_trigger == "SQUEEZE_RELEASE_BREAKOUT":
+            return "BREAKOUT_CANDIDATE"
         if weekly_extension > 20.0 or price_vs_ema8 > 6.0 or runup_20d > 25.0:
             return "EXTENDED"
         return "TRANSITION_CANDIDATE" if stage == "STAGE1_TO_2" else "EARLY_STAGE2_CANDIDATE"
 
     @staticmethod
-    def _qualifies(row: sqlite3.Row) -> bool:
-        required = (
-            "Close", "EMA8", "EMA21", "DIPlus", "DIMinus",
-            "DIPlus_Slope_5D", "MACDTimingHist", "MACDTimingHist_Slope_5D",
-        )
-        if any(row[name] is None for name in required) or not row["EMA8"]:
+    def _numeric_structure_ok(row: dict[str, Any]) -> bool:
+        """Derive bullish structure from numeric price/EMA values only."""
+        required = ("Close", "EMA8", "EMA21", "EMA50", "EMA8Slope", "EMA21Slope")
+        if any(row[name] is None for name in required):
             return False
-        price_vs_ema8 = 100.0 * (float(row["Close"]) / float(row["EMA8"]) - 1.0)
         return (
-            str(row["BullishStructure"]).strip().upper() in {"1", "TRUE", "BULL", "BULLISH"}
+            float(row["Close"]) >= float(row["EMA8"])
             and float(row["EMA8"]) >= float(row["EMA21"])
-            and float(row["DIPlus"]) > float(row["DIMinus"])
-            and float(row["DIPlus_Slope_5D"]) > 0
-            and float(row["MACDTimingHist"]) > 0
-            and float(row["MACDTimingHist_Slope_5D"]) > 0
-            and -1.0 <= price_vs_ema8 <= 4.0
+            # Permit the actual Stage 1-to-2 transition before the 21 fully clears the 50.
+            and float(row["EMA21"]) >= 0.99 * float(row["EMA50"])
+            and float(row["EMA8Slope"]) > 0.0
+            and float(row["EMA21Slope"]) > 0.0
         )
 
     @staticmethod
+    def _structure_state(consecutive_bars: int) -> str:
+        if consecutive_bars <= 0:
+            return "BROKEN"
+        if consecutive_bars < 3:
+            return "RESTORING"
+        return "CONFIRMED"
+
+    @staticmethod
+    def _entry_trigger(
+        row: dict[str, Any], previous: dict[str, Any] | None,
+        structure_state: str = "CONFIRMED",
+    ) -> str | None:
+        required = (
+            "Close", "EMA8", "EMA21", "DIPlus", "DIMinus",
+            "DIPlus_Slope_5D", "MACDTrendHist", "MACDTimingHist",
+            "MACDTimingHist_Slope_5D",
+        )
+        if (
+            previous is None
+            or any(row[name] is None for name in required)
+            or any(previous[name] is None for name in ("DIPlus", "MACDTrendHist", "MACDTimingHist"))
+            or not row["EMA8"]
+        ):
+            return None
+        price_vs_ema8 = 100.0 * (float(row["Close"]) / float(row["EMA8"]) - 1.0)
+        trend_hist_pct = 100.0 * float(row["MACDTrendHist"]) / float(row["Close"])
+        common = (
+            float(row["EMA8"]) >= float(row["EMA21"])
+            and float(row["DIPlus"]) > float(row["DIMinus"])
+            # A sub-half-point one-day dip is noise when the five-day DI+ slope
+            # and both MACD lanes are still improving (WTI 2025-09-18).
+            and float(row["DIPlus"]) >= float(previous["DIPlus"]) - 0.5
+            and float(row["DIPlus_Slope_5D"]) > 0
+            and float(row["MACDTrendHist"]) > float(previous["MACDTrendHist"])
+            and float(row["MACDTimingHist"]) > 0
+            and float(row["MACDTimingHist"]) > float(previous["MACDTimingHist"])
+            and float(row["MACDTimingHist_Slope_5D"]) > 0
+        )
+        if not common:
+            return None
+        if (
+            structure_state != "BROKEN"
+            and trend_hist_pct >= -0.10
+            and -1.0 <= price_vs_ema8 <= 4.0
+        ):
+            return "BASE_TRANSITION"
+        squeeze_release = bool(row["SqueezeReleased"])
+        di_jump = float(row["DIPlus"]) - float(previous["DIPlus"])
+        if squeeze_release and di_jump >= 5.0 and price_vs_ema8 <= 12.0:
+            return "SQUEEZE_RELEASE_BREAKOUT"
+        return None
+
+    @staticmethod
     def _measure(
-        symbol: str, signal: sqlite3.Row, bars: list[sqlite3.Row], index: int,
+        symbol: str, signal: dict[str, Any], previous_signal: dict[str, Any],
+        bars: list[sqlite3.Row], index: int,
         regime: tuple[str, float, float, float] | None,
+        entry_trigger: str,
+        structure_state: str,
+        consecutive_structure_bars: int,
     ) -> PilotEvent:
         entry = float(signal["Close"])
         price_vs_ema8 = 100.0 * (entry / float(signal["EMA8"]) - 1.0)
@@ -251,8 +355,24 @@ class PilotStudy:
             di_minus=round(float(signal["DIMinus"]), 2),
             di_plus_slope_5d=round(float(signal["DIPlus_Slope_5D"]), 3),
             adx=round(float(signal["ADX"]), 2) if signal["ADX"] is not None else 0.0,
+            trend_hist=round(float(signal["MACDTrendHist"]), 4),
+            trend_hist_pct_of_price=round(
+                100.0 * float(signal["MACDTrendHist"]) / entry, 4
+            ),
             timing_hist=round(float(signal["MACDTimingHist"]), 4),
             timing_slope_5d=round(float(signal["MACDTimingHist_Slope_5D"]), 4),
+            di_plus_change_1d=round(
+                float(signal["DIPlus"]) - float(previous_signal["DIPlus"]), 4
+            ),
+            timing_hist_change_1d=round(
+                float(signal["MACDTimingHist"]) - float(previous_signal["MACDTimingHist"]), 4
+            ),
+            tmo=round(float(signal["TMO"]), 4),
+            tmo_signal=round(float(signal["TMOSignal"]), 4),
+            tmo_change_1d=round(float(signal["TMO"]) - float(previous_signal["TMO"]), 4),
+            entry_trigger=entry_trigger,
+            numeric_structure_state=structure_state,
+            consecutive_structure_bars=consecutive_structure_bars,
             weinstein_stage=weekly_stage,
             weekly_ma30=round(weekly_ma, 4) if weekly_ma is not None else None,
             weekly_ma30_slope_5w_pct=(
@@ -263,7 +383,7 @@ class PilotStudy:
             ),
             runup_20d_pct=round(runup_20d, 2),
             entry_classification=PilotStudy._entry_classification(
-                regime, price_vs_ema8, runup_20d,
+                regime, price_vs_ema8, runup_20d, entry_trigger,
             ),
             outcome_status="COMPLETE" if complete else "OPEN",
             return_5d_pct=close_return(5),
