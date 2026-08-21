@@ -26,6 +26,7 @@ class PilotEvent:
     trend_hist: float
     trend_hist_pct_of_price: float
     timing_hist: float
+    timing_slope_3d: float
     timing_slope_5d: float
     di_plus_change_1d: float
     timing_hist_change_1d: float
@@ -159,6 +160,7 @@ class PilotStudy:
                 "DIPlus": di_plus[index], "DIMinus": di_minus[index], "ADX": adx[index],
                 "DIPlus_Slope_5D": indicators.slope(di_plus, 5, index),
                 "MACDTrendHist": trend[index], "MACDTimingHist": timing[index],
+                "MACDTimingHist_Slope_3D": indicators.slope(timing, 3, index),
                 "MACDTimingHist_Slope_5D": indicators.slope(timing, 5, index),
                 "TMO": tmo[index], "TMOSignal": tmo_signal[index],
                 "SqueezeReleased": index > 0 and squeeze_on[index - 1] and not squeeze_on[index],
@@ -257,7 +259,7 @@ class PilotStudy:
         required = (
             "Close", "EMA8", "EMA21", "DIPlus", "DIMinus",
             "DIPlus_Slope_5D", "MACDTrendHist", "MACDTimingHist",
-            "MACDTimingHist_Slope_5D",
+            "MACDTimingHist_Slope_3D", "MACDTimingHist_Slope_5D",
         )
         if (
             previous is None
@@ -278,7 +280,10 @@ class PilotStudy:
             and float(row["MACDTrendHist"]) > float(previous["MACDTrendHist"])
             and float(row["MACDTimingHist"]) > 0
             and float(row["MACDTimingHist"]) > float(previous["MACDTimingHist"])
-            and float(row["MACDTimingHist_Slope_5D"]) > 0
+            # The 3-day slope captures the current turn. A mandatory 5-day
+            # slope can remain negative solely because it still contains an
+            # older spike (WTI chart reviewed 2026-08-19, session 2026-08-18).
+            and float(row["MACDTimingHist_Slope_3D"]) > 0
         )
         if not common:
             return None
@@ -360,6 +365,7 @@ class PilotStudy:
                 100.0 * float(signal["MACDTrendHist"]) / entry, 4
             ),
             timing_hist=round(float(signal["MACDTimingHist"]), 4),
+            timing_slope_3d=round(float(signal["MACDTimingHist_Slope_3D"]), 4),
             timing_slope_5d=round(float(signal["MACDTimingHist_Slope_5D"]), 4),
             di_plus_change_1d=round(
                 float(signal["DIPlus"]) - float(previous_signal["DIPlus"]), 4

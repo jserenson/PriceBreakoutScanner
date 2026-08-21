@@ -58,7 +58,11 @@ class Candidate:
     squeeze_momentum: float
     squeeze_slope_3d: float
     squeeze_recent_turn: bool
+    squeeze_on: bool
+    squeeze_count: int
+    squeeze_released: bool
     tmo: float
+    tmo_signal: float
     tmo_slope_3d: float
     macd_trend_hist: float
     macd_trend_slope_3d: float

@@ -44,6 +44,14 @@ class StateModelTests(unittest.TestCase):
             "FLATTENING",
         )
 
+    def test_weakening_market_state_is_not_a_confirmed_ranking_state(self) -> None:
+        state = BreakoutScanner._market_state(
+            "PRIMED", "INTACT", "CONTROLLED",
+            [20, 21, 22, 23], [15, 15, 15, 15],
+            [5, 6, 7, 8], [20, 19, 18, 17],
+        )
+        self.assertEqual(state, "WEAKENING")
+
     def test_six_month_quality_rewards_persistent_bar_by_bar_structure(self) -> None:
         closes = [10 + index * 0.1 for index in range(130)]
         ema8 = [value - 0.1 for value in closes]

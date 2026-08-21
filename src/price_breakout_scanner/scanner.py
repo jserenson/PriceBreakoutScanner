@@ -240,10 +240,18 @@ class BreakoutScanner:
         di_minus_slope_5 = indicators.slope(di_minus, 5)
         di_spread_slope_3 = indicators.slope(di_spread_series, 3)
         di_spread_slope_5 = indicators.slope(di_spread_series, 5)
-        macd_trend = indicators.macd_histogram(closes, 12, 26, 9)
-        macd_timing = indicators.macd_histogram(closes, 5, 13, 4)
-        tmo_series = indicators.true_momentum(closes)
-        squeeze_series = indicators.squeeze_momentum(highs, lows, closes)
+        # Match the supplied ThinkScript studies used for visual validation.
+        macd_trend = indicators.macd_histogram(closes, 24, 52, 9)
+        macd_timing = indicators.macd_histogram(closes, 3, 10, 16)
+        tmo_series, tmo_signal_series = indicators.chart_tmo(closes, 14, 5, 3)
+        squeeze_series, squeeze_on_series, squeeze_count_series = (
+            indicators.clean_squeeze_v2(highs, lows, closes, 21, 2.0, 1.5)
+        )
+        squeeze_released = (
+            len(squeeze_on_series) > 1
+            and squeeze_on_series[-2]
+            and not squeeze_on_series[-1]
+        )
         structures = [
             closes[index] > ema20_series[index]
             and ema8_series[index] > ema20_series[index]
@@ -318,6 +326,12 @@ class BreakoutScanner:
         ) and ignition_state in {"CONFIRMED", "PRIMED"}:
             ignition_state = "WEAKENING"
             rejection_reason = "; ".join(deterioration_flags)
+        elif deterioration_flags and ignition_state == "CONFIRMED":
+            ignition_state = "PRIMED"
+            rejection_reason = (
+                "; ".join(deterioration_flags)
+                + "; awaiting renewed all-lane confirmation"
+            )
         market_state = cls._market_state(
             ignition_state, structure_state, extension_state,
             di_plus, di_minus, di_spread_series, adx_series,
@@ -325,12 +339,19 @@ class BreakoutScanner:
         score = cls._ignition_score(
             ignition_state, bars_since_di_cross, di_cross_confirmed,
             adx_at_cross, adx_slope, squeeze_series[-1], squeeze_slope, squeeze_turn,
-            tmo_series[-1], tmo_slope, macd_trend[-1], trend_slope,
+            tmo_series[-1], tmo_signal_series[-1], tmo_slope,
+            macd_trend[-1], trend_slope,
             macd_timing[-1], timing_slope, structure_state != "BROKEN", ema_spread,
             move_since_ignition, bars_since_ignition,
             trend_quality_6m, deterioration_flags, di_plus[-1], di_minus[-1],
             di_plus_slope_3, di_spread_slope_3, adx_series[-1], extension_state,
         )
+        if market_state == "BROKEN":
+            score = 0.0
+        elif market_state == "WEAKENING":
+            score = min(score, 49.0)
+        elif market_state in {"REPAIRING", "REPAIRING_EXTENDED"}:
+            score = min(score, 69.0)
         maturity_penalty = cls._maturity_penalty(
             runup_60, ema_spread, bars_since_reset, ignition_state, volume_ratio
         )
@@ -372,7 +393,12 @@ class BreakoutScanner:
             adx_at_cross=round(adx_at_cross, 2) if adx_at_cross is not None else None,
             squeeze_momentum=round(squeeze_series[-1], 3),
             squeeze_slope_3d=round(squeeze_slope, 3), squeeze_recent_turn=squeeze_turn,
-            tmo=round(tmo_series[-1], 2), tmo_slope_3d=round(tmo_slope, 3),
+            squeeze_on=squeeze_on_series[-1],
+            squeeze_count=squeeze_count_series[-1],
+            squeeze_released=squeeze_released,
+            tmo=round(tmo_series[-1], 4),
+            tmo_signal=round(tmo_signal_series[-1], 4),
+            tmo_slope_3d=round(tmo_slope, 4),
             macd_trend_hist=round(macd_trend[-1], 4),
             macd_trend_slope_3d=round(trend_slope, 4),
             macd_timing_hist=round(macd_timing[-1], 4),
@@ -630,7 +656,8 @@ class BreakoutScanner:
     def _ignition_score(
         state: str, bars_since_cross: int | None, cross_confirmed: bool,
         adx_at_cross: float | None, adx_slope: float, squeeze: float, squeeze_slope: float,
-        squeeze_turn: bool, tmo: float, tmo_slope: float, trend: float,
+        squeeze_turn: bool, tmo: float, tmo_signal: float, tmo_slope: float,
+        trend: float,
         trend_slope: float, timing: float, timing_slope: float,
         structure_ok: bool, ema_spread: float, move_since_ignition: float | None,
         bars_since_ignition: int | None,
@@ -652,7 +679,7 @@ class BreakoutScanner:
         score += 4 if adx_slope > 0 else 2 if adx_slope >= -0.10 else -3
         score += 3 if adx >= 20 else 2 if adx >= 15 else 1 if adx_slope > 0 else 0
         score += 6 if squeeze_slope > 0 and squeeze > 0 else -3 if squeeze <= 0 else 0
-        score += 5 if tmo >= 50 and tmo_slope > 0 else 2 if tmo > 0 and tmo_slope > 0 else -5 if tmo <= 0 else 0
+        score += 5 if tmo > 0 and tmo > tmo_signal and tmo_slope > 0 else 2 if tmo > 0 and tmo_slope > 0 else -5 if tmo <= 0 else 0
         score += 7 if trend > 0 and trend_slope > 0 else -5 if trend <= 0 else 0
         score += 7 if timing > 0 and timing_slope > 0 else -5 if timing <= 0 else 0
         score += {"CONFIRMED": 8, "PRIMED": 6, "REPAIRING": 2,

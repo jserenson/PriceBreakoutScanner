@@ -83,11 +83,26 @@ class PilotStudyTests(unittest.TestCase):
             "Close": 102.0, "EMA8": 100.0, "EMA21": 99.0,
             "DIPlus": 21.7, "DIMinus": 12.0, "DIPlus_Slope_5D": 1.0,
             "MACDTrendHist": -.001, "MACDTimingHist": .03,
+            "MACDTimingHist_Slope_3D": .01,
             "MACDTimingHist_Slope_5D": .01, "SqueezeReleased": False,
         }
         previous = {"DIPlus": 22.0, "MACDTrendHist": -.002, "MACDTimingHist": .02}
         self.assertEqual(
             PilotStudy._entry_trigger(current, previous, "RESTORING"),
+            "BASE_TRANSITION",
+        )
+
+    def test_current_three_day_macd_turn_is_not_blocked_by_old_five_day_spike(self) -> None:
+        current = {
+            "Close": 103.0, "EMA8": 100.0, "EMA21": 99.0,
+            "DIPlus": 32.0, "DIMinus": 20.0, "DIPlus_Slope_5D": .4,
+            "MACDTrendHist": .03, "MACDTimingHist": .057,
+            "MACDTimingHist_Slope_3D": .01,
+            "MACDTimingHist_Slope_5D": -.006, "SqueezeReleased": False,
+        }
+        previous = {"DIPlus": 31.0, "MACDTrendHist": .027, "MACDTimingHist": .054}
+        self.assertEqual(
+            PilotStudy._entry_trigger(current, previous, "CONFIRMED"),
             "BASE_TRANSITION",
         )
 

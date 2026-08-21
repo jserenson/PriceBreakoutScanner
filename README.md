@@ -1,4 +1,4 @@
-# PriceBreakoutScanner 1.3
+# PriceBreakoutScanner 1.4
 
 PriceBreakoutScanner is a **bar-by-bar trend-state and synchronized-ignition
 detector**. It walks raw end-of-day `price_history`, evaluates roughly six
@@ -40,13 +40,14 @@ All signals use data through the selected date—there is no look-ahead.
   above DI-. Confirmation requires DI+ to remain above DI- on the most recent
   bars and at least 70% of bars since the cross. ADX is sampled at the cross;
   low ADX is allowed because chart research showed it may strengthen later.
-- **Squeeze momentum approximation:** 20-bar linear-regression endpoint of
-  `close - (((highest20 + lowest20) / 2 + SMA20) / 2)`. The report includes its
-  3-bar slope and whether the slope recently turned positive.
-- **TMO approximation:** the sum of 14 pairwise close comparisons, scaled to
-  -100..+100, then smoothed by EMA5 and EMA3. Value and 3-bar slope are reported.
-- **MACD Trend:** standard 12/26/9 histogram and 3-bar slope.
-- **MACD Timing:** faster 5/13/4 histogram and 3-bar slope.
+- **Clean Squeeze + Momentum v2:** exact supplied ThinkScript parameters:
+  length 21, population standard deviation 2.0, simple 21-bar average true
+  range 1.5, and Mobius-style Inertia momentum using EMA21 in the midpoint.
+  Momentum, squeeze state, squeeze count, release, and 3-bar slope are reported.
+- **Chart TMO:** `close - close[14]`, smoothed by EMA5 twice, with an EMA3 signal.
+  Main value, signal value, and 3-bar slope are reported.
+- **MACD Trend:** chart 24/52/9 histogram and 3-bar slope.
+- **MACD Timing:** chart 3/10/16 histogram and 3-bar slope.
 - **Bullish structure:** close > EMA20, EMA8 > EMA20, and EMA20 at least 98% of
   EMA50. The scanner records when this structure was most recently restored.
 - **EMA separation:** `(EMA8 / EMA50 - 1) * 100`.
@@ -57,9 +58,9 @@ All signals use data through the selected date—there is no look-ahead.
 - **Deterioration:** the latest bar is checked separately so a still-positive
   +DI, TMO, Squeeze, or MACD histogram cannot hide that it has rolled over.
 
-The TMO and Squeeze formulas are documented approximations. They may not exactly
-match proprietary chart implementations, but are stable and testable across the
-entire database.
+These formulas are locally reproducible versions of the supplied ThinkScript.
+Small platform differences may remain from price adjustment, initialization,
+or rounding; the scanner therefore reports the underlying values and slopes.
 
 ## Synchronized ignition and states
 
@@ -120,8 +121,16 @@ conclusions.
 
 The pilot also derives a no-look-ahead Weinstein regime from weekly closes and
 the 30-week moving average. Entry classification uses that regime plus price
-extension and the stored indicator values. `Stage5Active` is deliberately not
-used to identify or validate entries.
+extension. All daily indicators are calculated independently from raw OHLCV;
+`symbol_analysis` and `Stage5Active` are deliberately not used to identify or
+validate entries.
+
+The timing trigger uses the current bar plus the three-day MACD Timing slope.
+The five-day slope remains in the diagnostic output but is not a gate because
+an older spike can keep it negative after the current histogram has turned up.
+The WTI chart reviewed on 2026-08-19 is therefore represented by its latest
+completed session, 2026-08-18 ($3.83 close). It is detected while the rejected
+2025-07-30 and 2025-08-26 signals remain excluded.
 
 ## Event-risk limitation
 
