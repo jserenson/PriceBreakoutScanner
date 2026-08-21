@@ -75,10 +75,21 @@ class BreakoutScannerTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_partial_session_is_not_selected(self) -> None:
+        self.assertEqual(self.scanner.price_source(), "price_history")
         self.assertEqual(self.scanner.latest_complete_date(), self.latest)
         sessions = self.scanner.session_dates(2)
         self.assertFalse(sessions[0][2])
         self.assertTrue(sessions[1][2])
+
+    def test_unadjusted_history_is_preferred_when_available(self) -> None:
+        with sqlite3.connect(self.database) as connection:
+            connection.execute(
+                "CREATE TABLE price_history_unadjusted AS "
+                "SELECT * FROM price_history"
+            )
+        scanner = BreakoutScanner(self.database)
+        self.assertEqual(scanner.price_source(), "price_history_unadjusted")
+        self.assertEqual(scanner.latest_complete_date(), self.latest)
 
     def test_recent_synchronized_ignition_tracks_extension_without_legacy_grade_filter(self) -> None:
         date_value, candidates = self.scanner.scan(min_score=0, symbols=["NET"])

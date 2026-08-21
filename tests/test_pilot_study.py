@@ -78,6 +78,21 @@ class PilotStudyTests(unittest.TestCase):
     def test_runs_without_symbol_analysis_table(self) -> None:
         self.assertIsInstance(PilotStudy(self.database).run("ONE"), list)
 
+    def test_prefers_unadjusted_history_when_available(self) -> None:
+        with sqlite3.connect(self.database) as connection:
+            connection.execute(
+                "CREATE TABLE price_history_unadjusted AS "
+                "SELECT * FROM price_history"
+            )
+            connection.execute(
+                "UPDATE price_history_unadjusted SET close=close+1"
+            )
+        with PilotStudy(self.database)._connect() as connection:
+            self.assertEqual(
+                PilotStudy._price_table(connection),
+                "price_history_unadjusted",
+            )
+
     def test_small_one_day_di_dip_is_not_treated_as_rollover(self) -> None:
         current = {
             "Close": 102.0, "EMA8": 100.0, "EMA21": 99.0,

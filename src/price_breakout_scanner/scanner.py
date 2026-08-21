@@ -17,7 +17,9 @@ class ScannerError(RuntimeError):
 
 
 class BreakoutScanner:
-    REQUIRED_TABLES = {"symbols", "price_history"}
+    REQUIRED_TABLES = {"symbols"}
+    PREFERRED_PRICE_TABLE = "price_history_unadjusted"
+    FALLBACK_PRICE_TABLE = "price_history"
     HISTORY_BARS = 180
     COMPLETE_COVERAGE = 0.95
 
@@ -45,13 +47,32 @@ class BreakoutScanner:
             raise ScannerError(
                 "Database is missing required tables: " + ", ".join(sorted(missing))
             )
+        if not {self.PREFERRED_PRICE_TABLE, self.FALLBACK_PRICE_TABLE} & tables:
+            raise ScannerError("Database is missing a supported price-history table")
+
+    def price_source(self) -> str:
+        with closing(self._connect()) as connection:
+            return self._price_table(connection)
+
+    def _price_table(self, connection: sqlite3.Connection) -> str:
+        tables = self._tables(connection)
+        if self.PREFERRED_PRICE_TABLE in tables:
+            available = connection.execute(
+                f"SELECT EXISTS(SELECT 1 FROM {self.PREFERRED_PRICE_TABLE} LIMIT 1)"
+            ).fetchone()[0]
+            if available:
+                return self.PREFERRED_PRICE_TABLE
+        if self.FALLBACK_PRICE_TABLE in tables:
+            return self.FALLBACK_PRICE_TABLE
+        raise ScannerError("Database is missing a supported price-history table")
 
     def session_dates(self, limit: int = 10) -> list[tuple[str, int, bool]]:
         """Return recent dates, symbol coverage, and completeness."""
         with closing(self._connect()) as connection:
+            price_table = self._price_table(connection)
             rows = connection.execute(
                 "SELECT date, COUNT(DISTINCT symbol_id) AS symbols "
-                "FROM price_history GROUP BY date ORDER BY date DESC LIMIT ?",
+                f"FROM {price_table} GROUP BY date ORDER BY date DESC LIMIT ?",
                 (max(limit + 10, 20),),
             ).fetchall()
         if not rows:
@@ -101,9 +122,12 @@ class BreakoutScanner:
         grade_values = tuple(sorted({value.upper() for value in grades}))
 
         with closing(self._connect()) as connection:
+            price_table = self._price_table(connection)
             date = date or self.latest_complete_date()
-            cutoff = self._history_cutoff(connection, date)
-            histories = self._load_history(connection, cutoff, date, selected_symbols)
+            cutoff = self._history_cutoff(connection, price_table, date)
+            histories = self._load_history(
+                connection, price_table, cutoff, date, selected_symbols
+            )
             legacy = self._load_legacy(connection, date)
             stored_stages = self._load_stages(connection, date)
 
@@ -122,9 +146,11 @@ class BreakoutScanner:
         ranked = [candidate.with_rank(index) for index, candidate in enumerate(candidates[:limit], 1)]
         return str(date), ranked
 
-    def _history_cutoff(self, connection: sqlite3.Connection, date: str) -> str:
+    def _history_cutoff(
+        self, connection: sqlite3.Connection, price_table: str, date: str
+    ) -> str:
         rows = connection.execute(
-            "SELECT DISTINCT date FROM price_history WHERE date <= ? "
+            f"SELECT DISTINCT date FROM {price_table} WHERE date <= ? "
             "ORDER BY date DESC LIMIT ?", (date, self.HISTORY_BARS)
         ).fetchall()
         if len(rows) < 60:
@@ -132,7 +158,8 @@ class BreakoutScanner:
         return str(rows[-1][0])
 
     def _load_history(
-        self, connection: sqlite3.Connection, cutoff: str, date: str,
+        self, connection: sqlite3.Connection, price_table: str,
+        cutoff: str, date: str,
         symbols: tuple[str, ...],
     ) -> dict[str, list[sqlite3.Row]]:
         clauses = ["ph.date BETWEEN ? AND ?", "s.active = 1"]
@@ -144,7 +171,7 @@ class BreakoutScanner:
             f"""
             SELECT s.symbol, s.company_name, ph.date, ph.open, ph.high, ph.low,
                    ph.close, ph.volume
-            FROM price_history ph JOIN symbols s ON s.id = ph.symbol_id
+            FROM {price_table} ph JOIN symbols s ON s.id = ph.symbol_id
             WHERE {' AND '.join(clauses)}
             ORDER BY s.symbol, ph.date
             """, parameters

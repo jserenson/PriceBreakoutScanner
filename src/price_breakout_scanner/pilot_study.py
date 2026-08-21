@@ -75,11 +75,12 @@ class PilotStudy:
             raise ValueError("cooldown cannot be negative")
         symbol = symbol.upper().strip()
         with self._connect() as connection:
-            self._validate(connection)
+            price_table = self._price_table(connection)
+            self._validate(connection, price_table)
             bars = connection.execute(
-                """
+                f"""
                 SELECT ph.date, ph.open, ph.high, ph.low, ph.close, ph.volume
-                FROM price_history ph JOIN symbols s ON s.id = ph.symbol_id
+                FROM {price_table} ph JOIN symbols s ON s.id = ph.symbol_id
                 WHERE UPPER(s.symbol) = ? ORDER BY ph.date
                 """, (symbol,),
             ).fetchall()
@@ -123,13 +124,34 @@ class PilotStudy:
         connection.execute("PRAGMA query_only = ON")
         return connection
 
-    def _validate(self, connection: sqlite3.Connection) -> None:
+    @staticmethod
+    def _price_table(connection: sqlite3.Connection) -> str:
+        tables = {
+            str(row[0]) for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if "price_history_unadjusted" in tables:
+            available = connection.execute(
+                "SELECT EXISTS(SELECT 1 FROM price_history_unadjusted LIMIT 1)"
+            ).fetchone()[0]
+            if available:
+                return "price_history_unadjusted"
+        if "price_history" in tables:
+            return "price_history"
+        raise ValueError("Database is missing a supported price-history table")
+
+    def _validate(self, connection: sqlite3.Connection, price_table: str) -> None:
         columns = {
-            str(row[1]) for row in connection.execute("PRAGMA table_info(price_history)")
+            str(row[1]) for row in connection.execute(
+                f"PRAGMA table_info({price_table})"
+            )
         }
         missing = self.REQUIRED_PRICE_COLUMNS - columns
         if missing:
-            raise ValueError("price_history is missing: " + ", ".join(sorted(missing)))
+            raise ValueError(
+                f"{price_table} is missing: " + ", ".join(sorted(missing))
+            )
 
     @staticmethod
     def _calculate_indicators(bars: list[sqlite3.Row]) -> list[dict[str, Any]]:

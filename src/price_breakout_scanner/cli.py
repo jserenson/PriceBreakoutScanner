@@ -66,7 +66,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    print(f"PriceBreakoutScanner v{__version__} | {selected_date} | {len(candidates)} candidates")
+    print(
+        f"PriceBreakoutScanner v{__version__} | {selected_date} | "
+        f"{len(candidates)} candidates | {scanner.price_source()}"
+    )
     if candidates:
         print(render_table(candidates))
     else:

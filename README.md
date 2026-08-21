@@ -1,7 +1,8 @@
-# PriceBreakoutScanner 1.4
+# PriceBreakoutScanner 1.5
 
 PriceBreakoutScanner is a **bar-by-bar trend-state and synchronized-ignition
-detector**. It walks raw end-of-day `price_history`, evaluates roughly six
+detector**. It prefers dividend-unadjusted end-of-day
+`price_history_unadjusted`, evaluates roughly six
 trading months of structure, and looks for the transition from repair into a
 newly confirmed bullish move without confusing an extended or deteriorating
 chart with a fresh setup.
@@ -13,6 +14,10 @@ is:
 ```text
 /Users/jamesserenson/Documents/AnacondaProjects/Stage5_SymbolDatabase/symbols.db
 ```
+
+Production scans use `price_history_unadjusted` and retain adjusted close only
+as reference data. Small legacy and unit-test databases may fall back to
+`price_history`; the CLI prints the selected source on every scan.
 
 ## Run
 
@@ -59,8 +64,8 @@ All signals use data through the selected date—there is no look-ahead.
   +DI, TMO, Squeeze, or MACD histogram cannot hide that it has rolled over.
 
 These formulas are locally reproducible versions of the supplied ThinkScript.
-Small platform differences may remain from price adjustment, initialization,
-or rounding; the scanner therefore reports the underlying values and slopes.
+Small platform differences may remain from initialization or rounding; the
+scanner therefore reports the underlying values and slopes.
 
 ## Synchronized ignition and states
 
