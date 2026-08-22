@@ -71,6 +71,39 @@ class StateModelTests(unittest.TestCase):
         )
         self.assertIn("DI+ rolled over", flags)
 
+    def test_readiness_states_are_explicit_review_buckets(self) -> None:
+        self.assertEqual(
+            BreakoutScanner._readiness_state("CONFIRMED"),
+            "CONFIRMED_NOT_EXTENDED",
+        )
+        self.assertEqual(
+            BreakoutScanner._readiness_state("CONFIRMED_EXTENDED"),
+            "CONFIRMED_EXTENDED",
+        )
+        self.assertEqual(
+            BreakoutScanner._readiness_state("PRIMED"),
+            "PRIMED_EARLY_EXPANSION",
+        )
+        self.assertEqual(
+            BreakoutScanner._readiness_state("REPAIRING"),
+            "REPAIRING_STRUCTURE",
+        )
+        self.assertEqual(
+            BreakoutScanner._readiness_state("WEAKENING"),
+            "WATCH_MOMENTUM_NOT_READY",
+        )
+
+    def test_ranking_keeps_readiness_buckets_in_review_order(self) -> None:
+        states = [
+            "CONFIRMED_NOT_EXTENDED", "CONFIRMED_EXTENDED",
+            "PRIMED_EARLY_EXPANSION", "REPAIRING_STRUCTURE",
+            "WATCH_MOMENTUM_NOT_READY",
+        ]
+        self.assertEqual(
+            [BreakoutScanner._ranking_priority(state) for state in states],
+            list(range(5)),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

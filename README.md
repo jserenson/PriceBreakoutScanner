@@ -1,4 +1,4 @@
-# PriceBreakoutScanner 1.5
+# PriceBreakoutScanner 1.5.1
 
 PriceBreakoutScanner is a **bar-by-bar trend-state and synchronized-ignition
 detector**. It prefers dividend-unadjusted end-of-day
@@ -84,6 +84,14 @@ remain separate: a chart may retain excellent EMA structure while being marked
 extended, and a positive DI crossover is downgraded when +DI and its spread roll
 over on the newest bar. Flat EMA ribbons remain repairing rather than receiving
 full trend credit.
+
+Results are presented in five entry-readiness buckets, in this order:
+**CONFIRMED_NOT_EXTENDED**, **CONFIRMED_EXTENDED**,
+**PRIMED_EARLY_EXPANSION**, **REPAIRING_STRUCTURE**, and
+**WATCH_MOMENTUM_NOT_READY**. Scores rank charts only within that review order,
+so a short-term momentum burst in a repairing structure cannot displace a
+fully aligned confirmed setup. Distance above EMA8/EMA21 remains visible and
+drives the extended bucket and its score penalty.
 
 This design intentionally rejects stale/current strong-stock false positives.
 CAT, CMI, DE, GE, IR, ITW, NVO, and ROK are rejected on the 2026-08-14 review

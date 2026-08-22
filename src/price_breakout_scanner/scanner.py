@@ -142,7 +142,13 @@ class BreakoutScanner:
                 continue
             candidates.append(candidate)
 
-        candidates.sort(key=lambda item: (-item.score, item.symbol))
+        candidates.sort(
+            key=lambda item: (
+                self._ranking_priority(item.readiness_state),
+                -item.score,
+                item.symbol,
+            )
+        )
         ranked = [candidate.with_rank(index) for index, candidate in enumerate(candidates[:limit], 1)]
         return str(date), ranked
 
@@ -363,6 +369,7 @@ class BreakoutScanner:
             ignition_state, structure_state, extension_state,
             di_plus, di_minus, di_spread_series, adx_series,
         )
+        readiness_state = cls._readiness_state(market_state)
         score = cls._ignition_score(
             ignition_state, bars_since_di_cross, di_cross_confirmed,
             adx_at_cross, adx_slope, squeeze_series[-1], squeeze_slope, squeeze_turn,
@@ -387,7 +394,8 @@ class BreakoutScanner:
         return Candidate(
             rank=None, symbol=symbol, company=clean[-1]["company_name"], date=date,
             score=round(score, 2), setup=ignition_state,
-            market_state=market_state, structure_state=structure_state,
+            market_state=market_state, readiness_state=readiness_state,
+            structure_state=structure_state,
             extension_state=extension_state, price=round(close, 2),
             trend_quality_6m_pct=round(trend_quality_6m, 1),
             positive_structure_bars_6m=positive_structure_bars,
@@ -599,6 +607,30 @@ class BreakoutScanner:
         ):
             return "CONFIRMED" if ignition_state == "CONFIRMED" else "PRIMED"
         return "WEAKENING"
+
+    @staticmethod
+    def _readiness_state(market_state: str) -> str:
+        """Put entry readiness in explicit, mutually exclusive review buckets."""
+        return {
+            "CONFIRMED": "CONFIRMED_NOT_EXTENDED",
+            "CONFIRMED_EXTENDED": "CONFIRMED_EXTENDED",
+            "PRIMED": "PRIMED_EARLY_EXPANSION",
+            "REPAIRING": "REPAIRING_STRUCTURE",
+            "REPAIRING_EXTENDED": "REPAIRING_STRUCTURE",
+            "WEAKENING": "WATCH_MOMENTUM_NOT_READY",
+            "BROKEN": "WATCH_MOMENTUM_NOT_READY",
+        }[market_state]
+
+    @staticmethod
+    def _ranking_priority(readiness_state: str) -> int:
+        """Keep score comparisons inside a readiness bucket, not across buckets."""
+        return {
+            "CONFIRMED_NOT_EXTENDED": 0,
+            "CONFIRMED_EXTENDED": 1,
+            "PRIMED_EARLY_EXPANSION": 2,
+            "REPAIRING_STRUCTURE": 3,
+            "WATCH_MOMENTUM_NOT_READY": 4,
+        }.get(readiness_state, 5)
 
     @classmethod
     def _bars_since_synchronized_ignition(

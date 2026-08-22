@@ -13,6 +13,7 @@ class Candidate:
     score: float
     setup: str
     market_state: str
+    readiness_state: str
     structure_state: str
     extension_state: str
     trend_quality_6m_pct: float

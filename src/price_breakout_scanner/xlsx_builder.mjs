@@ -15,7 +15,7 @@ const columnName = (number) => {
 };
 const columns = [
   ["Rank", "rank"], ["Symbol", "symbol"], ["Company", "company"], ["Date", "date"],
-  ["Ignition Score", "score"], ["Market State", "market_state"],
+  ["Ignition Score", "score"], ["Entry Readiness", "readiness_state"], ["Market State", "market_state"],
   ["Structure State", "structure_state"], ["Extension State", "extension_state"],
   ["6M Trend Quality %", "trend_quality_6m_pct"],
   ["Positive Structure Bars 6M", "positive_structure_bars_6m"],
