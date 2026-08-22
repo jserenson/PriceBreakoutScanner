@@ -369,7 +369,12 @@ class BreakoutScanner:
             ignition_state, structure_state, extension_state,
             di_plus, di_minus, di_spread_series, adx_series,
         )
-        readiness_state = cls._readiness_state(market_state)
+        momentum_phase = cls._momentum_phase(
+            structure_state, extension_state, bars_since_ignition,
+            squeeze_released, di_plus, di_minus, di_spread_series, adx_series,
+            tmo_series, squeeze_series, macd_trend, macd_timing,
+        )
+        readiness_state = cls._readiness_state(market_state, momentum_phase)
         score = cls._ignition_score(
             ignition_state, bars_since_di_cross, di_cross_confirmed,
             adx_at_cross, adx_slope, squeeze_series[-1], squeeze_slope, squeeze_turn,
@@ -395,6 +400,7 @@ class BreakoutScanner:
             rank=None, symbol=symbol, company=clean[-1]["company_name"], date=date,
             score=round(score, 2), setup=ignition_state,
             market_state=market_state, readiness_state=readiness_state,
+            momentum_phase=momentum_phase,
             structure_state=structure_state,
             extension_state=extension_state, price=round(close, 2),
             trend_quality_6m_pct=round(trend_quality_6m, 1),
@@ -609,27 +615,93 @@ class BreakoutScanner:
         return "WEAKENING"
 
     @staticmethod
-    def _readiness_state(market_state: str) -> str:
+    def _momentum_phase(
+        structure_state: str, extension_state: str,
+        bars_since_ignition: int | None, squeeze_released: bool,
+        di_plus: Sequence[float], di_minus: Sequence[float],
+        di_spread: Sequence[float], adx: Sequence[float],
+        tmo: Sequence[float], squeeze: Sequence[float],
+        trend: Sequence[float], timing: Sequence[float],
+    ) -> str:
+        """Classify the path of the move instead of its latest values alone."""
+        if structure_state == "BROKEN":
+            return "DETERIORATING"
+        slopes = (
+            indicators.slope(di_plus, 3), indicators.slope(di_spread, 3),
+            indicators.slope(tmo, 3), indicators.slope(squeeze, 3),
+            indicators.slope(trend, 3), indicators.slope(timing, 3),
+        )
+        improving = sum(value > 0 for value in slopes)
+        weakening = sum(value <= 0 for value in slopes)
+        di_control = di_plus[-1] > di_minus[-1]
+        di_rollover = (
+            indicators.count_declines(di_plus, 3) >= 2
+            and indicators.slope(di_plus, 3) < -0.15
+            and indicators.slope(di_spread, 3) < -0.15
+        )
+        energy_rollover = sum(
+            indicators.slope(series, 3) <= 0
+            for series in (tmo, squeeze, trend, timing)
+        )
+        if di_rollover and energy_rollover >= 2:
+            return "DETERIORATING"
+        if extension_state == "EXTENDED":
+            return "EXTENDED"
+        fresh = bars_since_ignition is not None and bars_since_ignition <= 7
+        adx_constructive = indicators.slope(adx, 3) >= -0.10
+        if fresh and di_control and improving >= 4 and (squeeze_released or adx_constructive):
+            return "IGNITING"
+        if structure_state == "REPAIRING" and di_control and improving >= 4:
+            return "PRIMED"
+        if structure_state == "REPAIRING":
+            return "REPAIRING"
+        if di_control and improving >= 4 and extension_state in {"HUGGING_EMA8", "CONTROLLED"}:
+            return "PRIMED"
+        if di_control and improving >= 3:
+            return "CONTINUING"
+        if di_control and weakening >= 3:
+            return "DIGESTING"
+        return "DETERIORATING"
+
+    @staticmethod
+    def _readiness_state(market_state: str, momentum_phase: str | None = None) -> str:
         """Put entry readiness in explicit, mutually exclusive review buckets."""
+        if momentum_phase is None:
+            return {
+                "CONFIRMED": "CONFIRMED_NOT_EXTENDED",
+                "CONFIRMED_EXTENDED": "CONFIRMED_EXTENDED",
+                "PRIMED": "PRIMED_EARLY_EXPANSION",
+                "REPAIRING": "REPAIRING_STRUCTURE",
+                "REPAIRING_EXTENDED": "REPAIRING_STRUCTURE",
+                "WEAKENING": "WATCH_MOMENTUM_NOT_READY",
+                "BROKEN": "WATCH_MOMENTUM_NOT_READY",
+            }[market_state]
         return {
-            "CONFIRMED": "CONFIRMED_NOT_EXTENDED",
-            "CONFIRMED_EXTENDED": "CONFIRMED_EXTENDED",
-            "PRIMED": "PRIMED_EARLY_EXPANSION",
+            "IGNITING": "IGNITING_ENTRY",
+            "PRIMED": "PRIMED_ENTRY",
+            "CONTINUING": "CONTINUING_NOT_EXTENDED",
+            "DIGESTING": "DIGESTING_WAIT",
             "REPAIRING": "REPAIRING_STRUCTURE",
-            "REPAIRING_EXTENDED": "REPAIRING_STRUCTURE",
-            "WEAKENING": "WATCH_MOMENTUM_NOT_READY",
-            "BROKEN": "WATCH_MOMENTUM_NOT_READY",
-        }[market_state]
+            "EXTENDED": "EXTENDED_WAIT_FOR_RESET",
+            "DETERIORATING": "DETERIORATING_NOT_READY",
+        }[momentum_phase]
 
     @staticmethod
     def _ranking_priority(readiness_state: str) -> int:
         """Keep score comparisons inside a readiness bucket, not across buckets."""
         return {
+            "IGNITING_ENTRY": 0,
+            "PRIMED_ENTRY": 1,
+            "CONTINUING_NOT_EXTENDED": 2,
+            "DIGESTING_WAIT": 3,
+            "REPAIRING_STRUCTURE": 4,
+            "EXTENDED_WAIT_FOR_RESET": 5,
+            "DETERIORATING_NOT_READY": 6,
+            # Keep v1.5.1 labels stable for callers constructing old records.
             "CONFIRMED_NOT_EXTENDED": 0,
-            "CONFIRMED_EXTENDED": 1,
-            "PRIMED_EARLY_EXPANSION": 2,
-            "REPAIRING_STRUCTURE": 3,
-            "WATCH_MOMENTUM_NOT_READY": 4,
+            "CONFIRMED_EXTENDED": 5,
+            "PRIMED_EARLY_EXPANSION": 1,
+            "WATCH_MOMENTUM_NOT_READY": 6,
         }.get(readiness_state, 5)
 
     @classmethod

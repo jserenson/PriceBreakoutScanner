@@ -95,14 +95,52 @@ class StateModelTests(unittest.TestCase):
 
     def test_ranking_keeps_readiness_buckets_in_review_order(self) -> None:
         states = [
-            "CONFIRMED_NOT_EXTENDED", "CONFIRMED_EXTENDED",
-            "PRIMED_EARLY_EXPANSION", "REPAIRING_STRUCTURE",
-            "WATCH_MOMENTUM_NOT_READY",
+            "IGNITING_ENTRY", "PRIMED_ENTRY", "CONTINUING_NOT_EXTENDED",
+            "DIGESTING_WAIT", "REPAIRING_STRUCTURE",
+            "EXTENDED_WAIT_FOR_RESET", "DETERIORATING_NOT_READY",
         ]
         self.assertEqual(
             [BreakoutScanner._ranking_priority(state) for state in states],
-            list(range(5)),
+            list(range(7)),
         )
+
+    def test_fresh_multi_lane_expansion_is_igniting(self) -> None:
+        phase = BreakoutScanner._momentum_phase(
+            "INTACT", "HUGGING_EMA8", 3, True,
+            [18, 19, 21, 24], [17, 16, 15, 14], [1, 3, 6, 10],
+            [16, 16.1, 16.4, 17], [-2, -1, 1, 4], [-1, 0, 2, 5],
+            [-.2, 0, .2, .5], [-.1, .1, .3, .6],
+        )
+        self.assertEqual(phase, "IGNITING")
+        self.assertEqual(BreakoutScanner._readiness_state("CONFIRMED", phase), "IGNITING_ENTRY")
+
+    def test_positive_but_flat_lanes_are_digesting(self) -> None:
+        phase = BreakoutScanner._momentum_phase(
+            "INTACT", "HUGGING_EMA8", 12, False,
+            [25, 25.2, 25.1, 25.0], [14, 14, 14, 14], [11, 11.2, 11.1, 11],
+            [24, 24.1, 24.1, 24.0], [8, 8.1, 8.05, 8], [5, 5.1, 5.05, 5],
+            [2, 2.1, 2.05, 2], [1, 1.1, 1.05, 1],
+        )
+        self.assertEqual(phase, "DIGESTING")
+
+    def test_three_day_di_rollover_with_energy_loss_is_deteriorating(self) -> None:
+        phase = BreakoutScanner._momentum_phase(
+            "INTACT", "CONTROLLED", 9, False,
+            [27, 29, 28, 26], [14, 14, 15, 16], [13, 15, 13, 10],
+            [25, 26, 27, 28], [12, 13, 12, 10], [8, 9, 8, 6],
+            [3, 3.2, 3.1, 2.8], [2, 2.2, 2.0, 1.7],
+        )
+        self.assertEqual(phase, "DETERIORATING")
+
+    def test_extension_is_a_wait_state_even_with_rising_momentum(self) -> None:
+        phase = BreakoutScanner._momentum_phase(
+            "INTACT", "EXTENDED", 4, True,
+            [18, 20, 22, 25], [16, 15, 14, 13], [2, 5, 8, 12],
+            [15, 16, 18, 21], [1, 3, 6, 10], [1, 2, 4, 7],
+            [1, 2, 3, 5], [1, 2, 4, 6],
+        )
+        self.assertEqual(phase, "EXTENDED")
+        self.assertEqual(BreakoutScanner._readiness_state("CONFIRMED_EXTENDED", phase), "EXTENDED_WAIT_FOR_RESET")
 
 
 if __name__ == "__main__":

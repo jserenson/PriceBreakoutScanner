@@ -14,6 +14,7 @@ class Candidate:
     setup: str
     market_state: str
     readiness_state: str
+    momentum_phase: str
     structure_state: str
     extension_state: str
     trend_quality_6m_pct: float

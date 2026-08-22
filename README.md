@@ -1,4 +1,4 @@
-# PriceBreakoutScanner 1.5.1
+# PriceBreakoutScanner 1.5.2
 
 PriceBreakoutScanner is a **bar-by-bar trend-state and synchronized-ignition
 detector**. It prefers dividend-unadjusted end-of-day
@@ -6,6 +6,12 @@ detector**. It prefers dividend-unadjusted end-of-day
 trading months of structure, and looks for the transition from repair into a
 newly confirmed bullish move without confusing an extended or deteriorating
 chart with a fresh setup.
+
+Version 1.5.2 adds a bar-by-bar momentum phase. Positive indicator values no
+longer imply fresh momentum: each result is labeled PRIMED, IGNITING,
+CONTINUING, DIGESTING, REPAIRING, EXTENDED, or DETERIORATING from the recent
+direction of DI+, the DI spread, TMO, squeeze momentum, and both MACD
+histograms. Structure and price extension remain separate decisions.
 
 Atlas TradeScore and TradeGrade remain optional comparison columns and do not
 drive default selection. SQLite is opened read-only. The default nightly source
@@ -85,10 +91,10 @@ extended, and a positive DI crossover is downgraded when +DI and its spread roll
 over on the newest bar. Flat EMA ribbons remain repairing rather than receiving
 full trend credit.
 
-Results are presented in five entry-readiness buckets, in this order:
-**CONFIRMED_NOT_EXTENDED**, **CONFIRMED_EXTENDED**,
-**PRIMED_EARLY_EXPANSION**, **REPAIRING_STRUCTURE**, and
-**WATCH_MOMENTUM_NOT_READY**. Scores rank charts only within that review order,
+Results are presented in entry-readiness buckets, in this order:
+**IGNITING_ENTRY**, **PRIMED_ENTRY**, **CONTINUING_NOT_EXTENDED**,
+**DIGESTING_WAIT**, **REPAIRING_STRUCTURE**, **EXTENDED_WAIT_FOR_RESET**, and
+**DETERIORATING_NOT_READY**. Scores rank charts only within that review order,
 so a short-term momentum burst in a repairing structure cannot displace a
 fully aligned confirmed setup. Distance above EMA8/EMA21 remains visible and
 drives the extended bucket and its score penalty.

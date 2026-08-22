@@ -15,7 +15,7 @@ const columnName = (number) => {
 };
 const columns = [
   ["Rank", "rank"], ["Symbol", "symbol"], ["Company", "company"], ["Date", "date"],
-  ["Ignition Score", "score"], ["Entry Readiness", "readiness_state"], ["Market State", "market_state"],
+  ["Ignition Score", "score"], ["Entry Readiness", "readiness_state"], ["Momentum Phase", "momentum_phase"], ["Market State", "market_state"],
   ["Structure State", "structure_state"], ["Extension State", "extension_state"],
   ["6M Trend Quality %", "trend_quality_6m_pct"],
   ["Positive Structure Bars 6M", "positive_structure_bars_6m"],
@@ -95,6 +95,7 @@ const methodRows = [
   ["ADX state", "Classify rising, falling, flattening, or turning up; flattening after decline is constructive during repair", "Avoid requiring already-high ADX before an early move"],
   ["Extension", "Normalize price distance above EMA8 by percent and ATR; also measure price to EMA21/EMA50", "Separate trend quality from entry risk"],
   ["Six-month bar review", "Score close/EMA8/EMA21/EMA50 alignment and each EMA slope on every one of the last 126 trading bars", "Distinguish durable upward structure from a one-day bullish snapshot"],
+  ["Momentum phase", "PRIMED, IGNITING, CONTINUING, DIGESTING, REPAIRING, EXTENDED, or DETERIORATING from the recent bar-by-bar slopes", "Separate fresh entry conditions from positive but mature or fading moves"],
   ["Deterioration flags", "Flag latest-bar DI+ rollover plus 3-bar weakening in DI, TMO, Squeeze, and both MACD histograms", "Do not rank a positive-but-declining indicator as strong"],
   ["Synchronized ignition", "Recent DI cross + restored structure + at least 4 of price above EMA8, MACD Trend, MACD Timing, TMO, and Squeeze improving", "Require clustered confirmation"],
   ["Lifecycle", "BROKEN -> REPAIRING -> PRIMED -> CONFIRMED -> CONFIRMED_EXTENDED -> WEAKENING", "Describe where the chart is, not just whether it passes"],
