@@ -291,7 +291,7 @@ class BreakoutScanner:
             and ema20_series[index] >= ema50_series[index] * 0.98
             for index in range(len(closes))
         ]
-        bars_since_di_cross = indicators.bars_since_cross(di_plus, di_minus)
+        bars_since_di_cross = cls._bars_since_meaningful_di_cross(di_plus, di_minus)
         di_cross_confirmed = cls._di_cross_confirmed(di_plus, di_minus, bars_since_di_cross)
         bars_since_structure = cls._bars_since_transition(structures)
         bars_since_ignition = cls._bars_since_synchronized_ignition(
@@ -373,6 +373,7 @@ class BreakoutScanner:
             structure_state, extension_state, bars_since_ignition,
             squeeze_released, di_plus, di_minus, di_spread_series, adx_series,
             tmo_series, squeeze_series, macd_trend, macd_timing,
+            runup_60, ema_spread, market_state,
         )
         readiness_state = cls._readiness_state(market_state, momentum_phase)
         score = cls._ignition_score(
@@ -464,6 +465,32 @@ class BreakoutScanner:
         observations = [di_plus[index] > di_minus[index] for index in range(start, len(di_plus))]
         recent = observations[-min(3, len(observations)) :]
         return all(recent) and sum(observations) / len(observations) >= 0.70
+
+    @classmethod
+    def _bars_since_meaningful_di_cross(
+        cls, di_plus: Sequence[float], di_minus: Sequence[float], limit: int = 60
+    ) -> int | None:
+        """Ignore one-bar DI failures that merely recross inside an active move."""
+        first = max(1, len(di_plus) - 1 - limit)
+        for index in range(len(di_plus) - 1, first - 1, -1):
+            if cls._meaningful_di_cross_at(di_plus, di_minus, index):
+                return len(di_plus) - 1 - index
+        return None
+
+    @staticmethod
+    def _meaningful_di_cross_at(
+        di_plus: Sequence[float], di_minus: Sequence[float], index: int
+    ) -> bool:
+        if index < 1 or not (
+            di_plus[index] > di_minus[index]
+            and di_plus[index - 1] <= di_minus[index - 1]
+        ):
+            return False
+        prior_start = max(0, index - 5)
+        prior = range(prior_start, index)
+        # A fresh transition needs actual bearish/neutral control before the
+        # cross, not a single marginal DI- tick during an established advance.
+        return sum(di_plus[position] <= di_minus[position] for position in prior) >= 3
 
     @staticmethod
     def _bars_since_transition(states: Sequence[bool], limit: int = 60) -> int | None:
@@ -622,9 +649,11 @@ class BreakoutScanner:
         di_spread: Sequence[float], adx: Sequence[float],
         tmo: Sequence[float], squeeze: Sequence[float],
         trend: Sequence[float], timing: Sequence[float],
+        runup_60: float = 0.0, ema8_ema50_spread: float = 0.0,
+        market_state: str | None = None,
     ) -> str:
         """Classify the path of the move instead of its latest values alone."""
-        if structure_state == "BROKEN":
+        if structure_state == "BROKEN" or market_state in {"BROKEN", "WEAKENING"}:
             return "DETERIORATING"
         slopes = (
             indicators.slope(di_plus, 3), indicators.slope(di_spread, 3),
@@ -648,9 +677,15 @@ class BreakoutScanner:
         if extension_state == "EXTENDED":
             return "EXTENDED"
         fresh = bars_since_ignition is not None and bars_since_ignition <= 7
+        mature_advance = runup_60 > 25 and ema8_ema50_spread > 6
         adx_constructive = indicators.slope(adx, 3) >= -0.10
-        if fresh and di_control and improving >= 4 and (squeeze_released or adx_constructive):
-            return "IGNITING"
+        if mature_advance and di_control and improving >= 3:
+            return "CONTINUING"
+        if (
+            structure_state == "INTACT" and fresh and di_control
+            and improving >= 4 and (squeeze_released or adx_constructive)
+        ):
+            return "IGNITING" if market_state in {None, "CONFIRMED"} else "PRIMED"
         if structure_state == "REPAIRING" and di_control and improving >= 4:
             return "PRIMED"
         if structure_state == "REPAIRING":
@@ -714,8 +749,7 @@ class BreakoutScanner:
         first_index = max(6, len(closes) - 1 - limit)
         for index in range(len(closes) - 1, first_index - 1, -1):
             recent_cross = any(
-                di_plus[cross] > di_minus[cross]
-                and di_plus[cross - 1] <= di_minus[cross - 1]
+                cls._meaningful_di_cross_at(di_plus, di_minus, cross)
                 for cross in range(max(1, index - 5), index + 1)
             )
             confirmations = sum(

@@ -142,6 +142,55 @@ class StateModelTests(unittest.TestCase):
         self.assertEqual(phase, "EXTENDED")
         self.assertEqual(BreakoutScanner._readiness_state("CONFIRMED_EXTENDED", phase), "EXTENDED_WAIT_FOR_RESET")
 
+    def test_one_day_di_failure_does_not_restart_cross_clock(self) -> None:
+        di_plus = [17, 18, 19, 21, 22, 23, 19.9, 24, 26]
+        di_minus = [23, 22, 21, 19, 18, 17, 20.0, 18, 17]
+        self.assertFalse(
+            BreakoutScanner._meaningful_di_cross_at(di_plus, di_minus, 7)
+        )
+        self.assertEqual(
+            BreakoutScanner._bars_since_meaningful_di_cross(di_plus, di_minus),
+            5,
+        )
+
+    def test_cross_after_sustained_di_minus_control_is_meaningful(self) -> None:
+        di_plus = [25, 20, 18, 17, 16, 22, 24]
+        di_minus = [18, 21, 22, 23, 21, 19, 18]
+        self.assertTrue(
+            BreakoutScanner._meaningful_di_cross_at(di_plus, di_minus, 5)
+        )
+        self.assertEqual(
+            BreakoutScanner._bars_since_meaningful_di_cross(di_plus, di_minus),
+            1,
+        )
+
+    def test_repairing_structure_cannot_be_called_igniting(self) -> None:
+        phase = BreakoutScanner._momentum_phase(
+            "REPAIRING", "CONTROLLED", 1, True,
+            [18, 20, 22, 25], [22, 20, 18, 16], [0, 2, 4, 9],
+            [14, 14, 15, 16], [-2, 0, 2, 5], [-1, 0, 2, 4],
+            [-1, 0, 1, 3], [-1, 0, 2, 5],
+        )
+        self.assertEqual(phase, "PRIMED")
+
+    def test_mature_advance_with_renewed_energy_is_continuing(self) -> None:
+        phase = BreakoutScanner._momentum_phase(
+            "INTACT", "CONTROLLED", 0, False,
+            [24, 27, 31, 36], [24, 22, 20, 18], [0, 5, 11, 18],
+            [15, 15, 16, 18], [1, 2, 4, 7], [1, 2, 4, 7],
+            [1, 2, 3, 5], [1, 2, 4, 6], 34.0, 6.8,
+        )
+        self.assertEqual(phase, "CONTINUING")
+
+    def test_broken_market_cannot_inherit_primed_momentum_label(self) -> None:
+        phase = BreakoutScanner._momentum_phase(
+            "REPAIRING", "CONTROLLED", 2, True,
+            [18, 20, 22, 25], [22, 20, 18, 16], [0, 2, 4, 9],
+            [14, 14, 15, 16], [-2, 0, 2, 5], [-1, 0, 2, 4],
+            [-1, 0, 1, 3], [-1, 0, 2, 5], 5.0, 2.0, "BROKEN",
+        )
+        self.assertEqual(phase, "DETERIORATING")
+
 
 if __name__ == "__main__":
     unittest.main()

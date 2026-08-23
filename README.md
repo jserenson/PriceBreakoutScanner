@@ -48,9 +48,12 @@ diagnostics for research.
 All signals use data through the selected date—there is no look-ahead.
 
 - **DI+/DI-/ADX:** Wilder 14. `bars_since_di_cross` starts when DI+ crosses
-  above DI-. Confirmation requires DI+ to remain above DI- on the most recent
-  bars and at least 70% of bars since the cross. ADX is sampled at the cross;
-  low ADX is allowed because chart research showed it may strengthen later.
+  above DI- after DI- controlled at least three of the preceding five bars.
+  This prevents a one-day DI wobble and recross from restarting the ignition
+  clock inside an established move. Confirmation requires DI+ to remain above
+  DI- on the most recent bars and at least 70% of bars since the cross. ADX is
+  sampled at the cross; low ADX is allowed because chart research showed it may
+  strengthen later.
 - **Clean Squeeze + Momentum v2:** exact supplied ThinkScript parameters:
   length 21, population standard deviation 2.0, simple 21-bar average true
   range 1.5, and Mobius-style Inertia momentum using EMA21 in the midpoint.
@@ -89,7 +92,10 @@ Current lifecycle states are **REPAIRING**, **PRIMED**, **CONFIRMED**,
 remain separate: a chart may retain excellent EMA structure while being marked
 extended, and a positive DI crossover is downgraded when +DI and its spread roll
 over on the newest bar. Flat EMA ribbons remain repairing rather than receiving
-full trend credit.
+full trend credit. `IGNITING_ENTRY` requires intact structure. A move already up
+more than 25% from its 60-day low with more than 6% EMA8/EMA50 separation is
+treated as continuation rather than having its ignition clock restarted by a
+secondary momentum surge.
 
 Results are presented in entry-readiness buckets, in this order:
 **IGNITING_ENTRY**, **PRIMED_ENTRY**, **CONTINUING_NOT_EXTENDED**,
