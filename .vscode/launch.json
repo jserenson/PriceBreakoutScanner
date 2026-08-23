@@ -13,7 +13,7 @@
             }
         },
         {
-            "name": "Export PriceBreakoutScanner Excel",
+            "name": "Run PriceBreakoutScanner with Args",
             "type": "debugpy",
             "request": "launch",
             "module": "price_breakout_scanner",
