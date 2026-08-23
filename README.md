@@ -38,6 +38,11 @@ PYTHONPATH=src python3 -m price_breakout_scanner --limit 100 --export reports/la
 PYTHONPATH=src python3 -m price_breakout_scanner --dates
 ```
 
+Normal scans print an immediate start message and a heartbeat every five
+seconds with elapsed time and the current phase. Progress messages go to the
+terminal only and never enter CSV, JSON, or Excel results. Use `--quiet` when a
+script needs completely silent progress output.
+
 The newest session is used only when its symbol coverage is at least 95% of the
 recent-session median. Defaults are score >=55, 20-day dollar volume >=$1
 million, and 20 rows. `--min-score 0 --symbol VRTX` exposes rejected/watch

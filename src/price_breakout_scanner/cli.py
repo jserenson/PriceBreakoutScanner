@@ -3,7 +3,11 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
+import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import TextIO
 
 from . import __version__
 from .output import render_table, write_export
@@ -38,7 +42,47 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--limit", type=int, default=20)
     result.add_argument("--export", type=Path, help="Write results to a .csv, .json, or .xlsx file")
     result.add_argument("--format", choices=("csv", "json", "xlsx"), help="Export format override")
+    result.add_argument("--quiet", action="store_true", help="Suppress scanner heartbeat messages")
     return result
+
+
+class Heartbeat:
+    """Show that a long scan is alive without mixing status into its results."""
+
+    def __init__(self, *, interval: float = 5.0, stream: TextIO = sys.stderr):
+        self.interval = interval
+        self.stream = stream
+        self.status = "starting"
+        self.started = 0.0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def __enter__(self) -> "Heartbeat":
+        self.started = time.monotonic()
+        print("Scanner started — heartbeat active", file=self.stream, flush=True)
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return self
+
+    def update(self, status: str) -> None:
+        self.status = status
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=max(1.0, self.interval * 2))
+        elapsed = time.monotonic() - self.started
+        outcome = "stopped" if exc_type else "finished"
+        print(f"Scanner {outcome} after {elapsed:.1f}s", file=self.stream, flush=True)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            elapsed = time.monotonic() - self.started
+            print(
+                f"Scanner running — {elapsed:.0f}s — {self.status}",
+                file=self.stream,
+                flush=True,
+            )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -50,18 +94,12 @@ def main(argv: list[str] | None = None) -> int:
             for session_date, count, complete in scanner.session_dates():
                 print(f"{session_date}  {count:>5} symbols  {'complete' if complete else 'partial'}")
             return 0
-        selected_date, candidates = scanner.scan(
-            date=args.date,
-            min_score=args.min_score,
-            grades=_csv_values(args.grades),
-            min_dollar_volume=args.min_dollar_volume,
-            require_liquidity=not args.allow_illiquid,
-            require_bullish_structure=not args.allow_nonbullish,
-            archetypes=args.archetype,
-            transitions=args.transition,
-            symbols=args.symbol,
-            limit=args.limit,
-        )
+        heartbeat = None if args.quiet else Heartbeat()
+        if heartbeat:
+            with heartbeat:
+                selected_date, candidates = _scan(scanner, args, heartbeat.update)
+        else:
+            selected_date, candidates = _scan(scanner, args, None)
     except ScannerError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -81,12 +119,34 @@ def main(argv: list[str] | None = None) -> int:
             print("error: export must use .csv/.json/.xlsx or --format", file=sys.stderr)
             return 2
         try:
+            if not args.quiet:
+                print(f"Exporting {format_name.upper()} report…", file=sys.stderr, flush=True)
             output = write_export(args.export, candidates, format_name)
         except (OSError, RuntimeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
         print(f"Exported: {output.resolve()}")
     return 0
+
+
+def _scan(
+    scanner: BreakoutScanner,
+    args: argparse.Namespace,
+    progress: Callable[[str], None] | None,
+) -> tuple[str, list]:
+    return scanner.scan(
+        date=args.date,
+        min_score=args.min_score,
+        grades=_csv_values(args.grades),
+        min_dollar_volume=args.min_dollar_volume,
+        require_liquidity=not args.allow_illiquid,
+        require_bullish_structure=not args.allow_nonbullish,
+        archetypes=args.archetype,
+        transitions=args.transition,
+        symbols=args.symbol,
+        limit=args.limit,
+        progress=progress,
+    )
 
 
 def _csv_values(value: str) -> tuple[str, ...]:

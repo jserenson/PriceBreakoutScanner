@@ -4,7 +4,7 @@ import math
 import sqlite3
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import closing
 from pathlib import Path
 
@@ -108,6 +108,7 @@ class BreakoutScanner:
         transitions: Iterable[str] = (),
         symbols: Iterable[str] = (),
         limit: int = 20,
+        progress: Callable[[str], None] | None = None,
     ) -> tuple[str, list[Candidate]]:
         """Rank price-action setups; legacy arguments remain CLI-compatible.
 
@@ -121,10 +122,14 @@ class BreakoutScanner:
         selected_symbols = tuple(sorted({value.upper() for value in symbols}))
         grade_values = tuple(sorted({value.upper() for value in grades}))
 
+        if progress:
+            progress("selecting the latest complete session")
         with closing(self._connect()) as connection:
             price_table = self._price_table(connection)
             date = date or self.latest_complete_date()
             cutoff = self._history_cutoff(connection, price_table, date)
+            if progress:
+                progress("loading six months of price history")
             histories = self._load_history(
                 connection, price_table, cutoff, date, selected_symbols
             )
@@ -132,7 +137,12 @@ class BreakoutScanner:
             stored_stages = self._load_stages(connection, date)
 
         candidates: list[Candidate] = []
-        for symbol, bars in histories.items():
+        total = len(histories)
+        if progress:
+            progress(f"analyzing 0 of {total:,} symbols")
+        for index, (symbol, bars) in enumerate(histories.items(), 1):
+            if progress and (index % 100 == 0 or index == total):
+                progress(f"analyzing {index:,} of {total:,} symbols")
             candidate = self._analyze(symbol, bars, date, legacy.get(symbol), stored_stages.get(symbol))
             if candidate is None or candidate.score < min_score:
                 continue
@@ -142,6 +152,8 @@ class BreakoutScanner:
                 continue
             candidates.append(candidate)
 
+        if progress:
+            progress(f"ranking {len(candidates):,} qualifying candidates")
         candidates.sort(
             key=lambda item: (
                 self._ranking_priority(item.readiness_state),

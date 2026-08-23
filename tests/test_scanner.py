@@ -161,6 +161,19 @@ class BreakoutScannerTests(unittest.TestCase):
         with self.assertRaisesRegex(ScannerError, "Database not found"):
             BreakoutScanner(Path(self.temporary.name) / "missing.db").validate()
 
+    def test_progress_reports_scan_phases_and_symbol_count(self) -> None:
+        messages: list[str] = []
+        self.scanner.scan(
+            min_score=0,
+            symbols=["NET"],
+            require_liquidity=False,
+            progress=messages.append,
+        )
+        self.assertIn("selecting the latest complete session", messages)
+        self.assertIn("loading six months of price history", messages)
+        self.assertIn("analyzing 1 of 1 symbols", messages)
+        self.assertTrue(messages[-1].startswith("ranking "))
+
 
 if __name__ == "__main__":
     unittest.main()
