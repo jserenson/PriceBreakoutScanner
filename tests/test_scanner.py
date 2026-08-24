@@ -152,6 +152,7 @@ class BreakoutScannerTests(unittest.TestCase):
         self.assertIn("trend_quality_6m_pct", rows[0])
         self.assertIn("deterioration_flags", rows[0])
         self.assertIn("readiness_state", rows[0])
+        self.assertIn("review_action", rows[0])
         self.assertIn("momentum_phase", rows[0])
         self.assertIn("squeeze_count", rows[0])
         self.assertIn("tmo_signal", rows[0])

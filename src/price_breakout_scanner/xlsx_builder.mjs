@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createRequire } from "node:module";
 
-const [dataPath, outputPath, runtimeDirectory] = process.argv.slice(2);
+const [dataPath, outputPath, runtimeDirectory, reportMode = "summary"] = process.argv.slice(2);
 const requireFromRuntime = createRequire(path.join(runtimeDirectory, "entry.cjs"));
 const { SpreadsheetFile, Workbook } = requireFromRuntime("@oai/artifact-tool");
 const records = JSON.parse(await fs.readFile(dataPath, "utf8"));
@@ -13,9 +13,10 @@ const columnName = (number) => {
   }
   return result;
 };
-const columns = [
+const allColumns = [
   ["Rank", "rank"], ["Symbol", "symbol"], ["Company", "company"], ["Date", "date"],
-  ["Ignition Score", "score"], ["Entry Readiness", "readiness_state"], ["Momentum Phase", "momentum_phase"], ["Market State", "market_state"],
+  ["Ignition Score", "score"], ["Review Action", "review_action"],
+  ["Entry Readiness", "readiness_state"], ["Momentum Phase", "momentum_phase"], ["Market State", "market_state"],
   ["Structure State", "structure_state"], ["Extension State", "extension_state"],
   ["6M Trend Quality %", "trend_quality_6m_pct"],
   ["Positive Structure Bars 6M", "positive_structure_bars_6m"],
@@ -44,8 +45,19 @@ const columns = [
   ["Rejection / Watch Reason", "rejection_reason"], ["20D Dollar Volume", "dollar_volume_20d"],
   ["Legacy Atlas Score", "legacy_score"], ["Legacy Grade", "grade"],
 ];
+const watchlistKeys = new Set([
+  "rank", "symbol", "company", "date", "score", "review_action",
+  "readiness_state", "momentum_phase", "structure_state", "extension_state",
+  "trend_quality_6m_pct", "price", "price_ema8_distance_pct",
+  "price_ema8_distance_atr", "bars_since_ignition", "di_plus_slope_3d",
+  "di_spread_slope_3d", "adx_state", "deterioration_flags", "rejection_reason",
+]);
+const columns = reportMode === "details"
+  ? allColumns.filter(([, key]) => watchlistKeys.has(key))
+  : allColumns;
 const workbook = Workbook.create();
-const sheet = workbook.worksheets.add("Ignition Candidates");
+const summaryName = reportMode === "details" ? "Watchlist Summary" : "Ignition Candidates";
+const sheet = workbook.worksheets.add(summaryName);
 sheet.showGridLines = false;
 sheet.freezePanes.freezeRows(1);
 const matrix = [columns.map(([header]) => header), ...records.map((record) => columns.map(([, key]) => record[key] ?? null))];
@@ -114,10 +126,59 @@ methods.getRangeByIndexes(0, 1, methodRows.length, 1).format.columnWidthPx = 760
 methods.getRangeByIndexes(0, 2, methodRows.length, 1).format.columnWidthPx = 600;
 methodRange.format.autofitRows();
 
+if (reportMode === "details") {
+  for (const record of records) {
+    const safeName = String(record.symbol ?? "Ticker").replace(/[\\/?*:[\]]/g, "_").slice(0, 31);
+    const detail = workbook.worksheets.add(safeName);
+    detail.showGridLines = false;
+    detail.freezePanes.freezeRows(1);
+    const detailRows = [
+      ["Metric", "Value"],
+      ["Symbol", record.symbol], ["Company", record.company], ["Data Date", record.date],
+      ["Review Action", record.review_action], ["Entry Readiness", record.readiness_state],
+      ["Momentum Phase", record.momentum_phase], ["Scanner Score", record.score],
+      ["Structure", record.structure_state], ["Extension", record.extension_state],
+      ["Price", record.price], ["Price / EMA8 %", record.price_ema8_distance_pct],
+      ["Price / EMA21 %", record.price_ema21_distance_pct],
+      ["Price / EMA50 %", record.price_ema50_distance_pct],
+      ["Price / EMA8 ATR", record.price_ema8_distance_atr],
+      ["6M Trend Quality %", record.trend_quality_6m_pct],
+      ["Positive Structure Bars 6M", record.positive_structure_bars_6m],
+      ["Bars Since Ignition", record.bars_since_ignition],
+      ["Move Since Ignition %", record.move_since_ignition_pct],
+      ["Bars Since DI+ Cross", record.bars_since_di_cross],
+      ["DI+", record.di_plus], ["DI-", record.di_minus], ["DI Spread", record.di_spread],
+      ["DI+ Slope 3D", record.di_plus_slope_3d],
+      ["DI Spread Slope 3D", record.di_spread_slope_3d],
+      ["ADX", record.adx], ["ADX State", record.adx_state],
+      ["TMO", record.tmo], ["TMO Slope 3D", record.tmo_slope_3d],
+      ["Squeeze Momentum", record.squeeze_momentum],
+      ["Squeeze Slope 3D", record.squeeze_slope_3d],
+      ["MACD Trend Hist", record.macd_trend_hist],
+      ["MACD Trend Slope 3D", record.macd_trend_slope_3d],
+      ["MACD Timing Hist", record.macd_timing_hist],
+      ["MACD Timing Slope 3D", record.macd_timing_slope_3d],
+      ["Deterioration Flags", record.deterioration_flags],
+      ["Watch / Rejection Reason", record.rejection_reason],
+      ["Event Risk", record.event_risk],
+    ];
+    const detailRange = detail.getRangeByIndexes(0, 0, detailRows.length, 2);
+    detailRange.values = detailRows.map((row) => row.map((value) => value ?? "—"));
+    detailRange.format.font = { name: "Menlo Regular", size: 15, color: "#1F2937" };
+    detailRange.format.wrapText = true;
+    detail.getRange("A1:B1").format.fill = "#17365D";
+    detail.getRange("A1:B1").format.font = { name: "Menlo Regular", size: 15, bold: true, color: "#FFFFFF" };
+    detail.getRangeByIndexes(0, 0, detailRows.length, 1).format.font = { name: "Menlo Regular", size: 15, bold: true, color: "#17365D" };
+    detail.getRangeByIndexes(0, 0, detailRows.length, 1).format.columnWidthPx = 330;
+    detail.getRangeByIndexes(0, 1, detailRows.length, 1).format.columnWidthPx = 650;
+    detailRange.format.autofitRows();
+  }
+}
+
 const errors = await workbook.inspect({ kind: "match", searchTerm: "#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A", options: { useRegex: true, maxResults: 50 }, summary: "formula error scan" });
 const lastColumn = columnName(columnCount);
-const inspection = await workbook.inspect({ kind: "table", range: `Ignition Candidates!A1:${lastColumn}${rowCount}`, include: "values,formulas", tableMaxRows: 5, tableMaxCols: columnCount, maxChars: 8000 });
-for (const [sheetName, range] of [["Ignition Candidates", `A1:${lastColumn}${Math.min(rowCount, 21)}`], ["Methodology", `A1:C${methodRows.length}`]]) {
+const inspection = await workbook.inspect({ kind: "table", range: `${summaryName}!A1:${lastColumn}${rowCount}`, include: "values,formulas", tableMaxRows: 5, tableMaxCols: columnCount, maxChars: 8000 });
+for (const [sheetName, range] of [[summaryName, `A1:${lastColumn}${Math.min(rowCount, 21)}`], ["Methodology", `A1:C${methodRows.length}`]]) {
   const preview = await workbook.render({ sheetName, range, scale: 1, format: "png" });
   await fs.writeFile(path.join(path.dirname(outputPath), `.PriceBreakoutScanner-${sheetName.replaceAll(" ", "-")}.png`), new Uint8Array(await preview.arrayBuffer()));
 }

@@ -388,6 +388,7 @@ class BreakoutScanner:
             runup_60, ema_spread, market_state,
         )
         readiness_state = cls._readiness_state(market_state, momentum_phase)
+        review_action = cls._review_action(readiness_state)
         score = cls._ignition_score(
             ignition_state, bars_since_di_cross, di_cross_confirmed,
             adx_at_cross, adx_slope, squeeze_series[-1], squeeze_slope, squeeze_turn,
@@ -413,6 +414,7 @@ class BreakoutScanner:
             rank=None, symbol=symbol, company=clean[-1]["company_name"], date=date,
             score=round(score, 2), setup=ignition_state,
             market_state=market_state, readiness_state=readiness_state,
+            review_action=review_action,
             momentum_phase=momentum_phase,
             structure_state=structure_state,
             extension_state=extension_state, price=round(close, 2),
@@ -694,6 +696,13 @@ class BreakoutScanner:
         if mature_advance and di_control and improving >= 3:
             return "CONTINUING"
         if (
+            structure_state == "INTACT"
+            and bars_since_ignition is not None
+            and bars_since_ignition > 12
+            and di_control and improving >= 3
+        ):
+            return "CONTINUING"
+        if (
             structure_state == "INTACT" and fresh and di_control
             and improving >= 4 and (squeeze_released or adx_constructive)
         ):
@@ -750,6 +759,18 @@ class BreakoutScanner:
             "PRIMED_EARLY_EXPANSION": 1,
             "WATCH_MOMENTUM_NOT_READY": 6,
         }.get(readiness_state, 5)
+
+    @staticmethod
+    def _review_action(readiness_state: str) -> str:
+        return {
+            "IGNITING_ENTRY": "REVIEW_NOW",
+            "PRIMED_ENTRY": "WAIT_FOR_CONFIRMATION",
+            "CONTINUING_NOT_EXTENDED": "REVIEW_CONTINUATION",
+            "DIGESTING_WAIT": "WAIT_FOR_MOMENTUM",
+            "REPAIRING_STRUCTURE": "WAIT_FOR_CONFIRMATION",
+            "EXTENDED_WAIT_FOR_RESET": "WAIT_FOR_PULLBACK",
+            "DETERIORATING_NOT_READY": "AVOID_FOR_NOW",
+        }.get(readiness_state, "REVIEW_MANUALLY")
 
     @classmethod
     def _bars_since_synchronized_ignition(

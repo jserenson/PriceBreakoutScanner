@@ -191,6 +191,28 @@ class StateModelTests(unittest.TestCase):
         )
         self.assertEqual(phase, "DETERIORATING")
 
+    def test_old_ignition_with_improving_lanes_is_continuation(self) -> None:
+        phase = BreakoutScanner._momentum_phase(
+            "INTACT", "CONTROLLED", 26, False,
+            [20, 22, 24, 27], [18, 17, 16, 15], [2, 5, 8, 12],
+            [15, 15, 16, 17], [1, 2, 4, 6], [1, 2, 3, 5],
+            [1, 2, 4, 6], [1, 2, 3, 5], 18.0, 4.0, "CONFIRMED",
+        )
+        self.assertEqual(phase, "CONTINUING")
+
+    def test_review_actions_are_plain_language_decisions(self) -> None:
+        self.assertEqual(
+            BreakoutScanner._review_action("IGNITING_ENTRY"), "REVIEW_NOW"
+        )
+        self.assertEqual(
+            BreakoutScanner._review_action("EXTENDED_WAIT_FOR_RESET"),
+            "WAIT_FOR_PULLBACK",
+        )
+        self.assertEqual(
+            BreakoutScanner._review_action("DETERIORATING_NOT_READY"),
+            "AVOID_FOR_NOW",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

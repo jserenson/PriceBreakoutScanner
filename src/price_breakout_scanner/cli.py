@@ -39,6 +39,10 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--archetype", action="append", default=[], help=argparse.SUPPRESS)
     result.add_argument("--transition", action="append", default=[], help=argparse.SUPPRESS)
     result.add_argument("--symbol", action="append", default=[])
+    result.add_argument(
+        "--watchlist",
+        help="Analyze every ticker in a comma-separated recommendation list",
+    )
     result.add_argument("--limit", type=int, default=20)
     result.add_argument("--export", type=Path, help="Write results to a .csv, .json, or .xlsx file")
     result.add_argument("--format", choices=("csv", "json", "xlsx"), help="Export format override")
@@ -87,6 +91,14 @@ class Heartbeat:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    watchlist = _csv_values(args.watchlist or "")
+    if watchlist:
+        args.symbol = list(dict.fromkeys([*args.symbol, *watchlist]))
+        args.min_score = 0.0
+        args.allow_illiquid = True
+        args.limit = max(args.limit, len(args.symbol))
+        if args.export is None:
+            args.export = Path("reports/watchlist_analysis.xlsx")
     scanner = BreakoutScanner(args.db)
     try:
         scanner.validate()
@@ -121,11 +133,21 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if not args.quiet:
                 print(f"Exporting {format_name.upper()} report…", file=sys.stderr, flush=True)
-            output = write_export(args.export, candidates, format_name)
+            output = write_export(
+                args.export,
+                candidates,
+                format_name,
+                detail_sheets=bool(watchlist),
+            )
         except (OSError, RuntimeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
         print(f"Exported: {output.resolve()}")
+        if watchlist:
+            returned = {candidate.symbol.upper() for candidate in candidates}
+            unavailable = [symbol for symbol in args.symbol if symbol.upper() not in returned]
+            if unavailable:
+                print("Unavailable or insufficient history: " + ", ".join(unavailable))
     return 0
 
 

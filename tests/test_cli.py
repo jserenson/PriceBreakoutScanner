@@ -21,6 +21,10 @@ class CliTests(unittest.TestCase):
     def test_quiet_option_suppresses_heartbeat(self) -> None:
         self.assertTrue(parser().parse_args(["--quiet"]).quiet)
 
+    def test_watchlist_accepts_comma_separated_tickers(self) -> None:
+        args = parser().parse_args(["--watchlist", "AAPL,MSFT,NVDA"])
+        self.assertEqual(args.watchlist, "AAPL,MSFT,NVDA")
+
 
 if __name__ == "__main__":
     unittest.main()

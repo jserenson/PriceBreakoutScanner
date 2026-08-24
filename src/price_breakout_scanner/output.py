@@ -13,10 +13,11 @@ from .models import Candidate
 
 
 def render_table(candidates: Sequence[Candidate]) -> str:
-    headers = ("#", "Symbol", "Score", "Readiness", "Momentum", "Market", "Structure", "Extension", "6M Quality", "Price", "DI+ 3/5", "DI- 3/5", "Spread 3/5", "ADX", "ADX State", "Ignition", "Deterioration / Reason")
+    headers = ("#", "Symbol", "Score", "Action", "Readiness", "Momentum", "Market", "Structure", "Extension", "6M Quality", "Price", "DI+ 3/5", "DI- 3/5", "Spread 3/5", "ADX", "ADX State", "Ignition", "Deterioration / Reason")
     rows = [
         (
-            item.rank or "-", item.symbol, f"{item.score:.2f}", item.readiness_state,
+            item.rank or "-", item.symbol, f"{item.score:.2f}", item.review_action,
+            item.readiness_state,
             item.momentum_phase, item.market_state,
             item.structure_state, item.extension_state, f"{item.trend_quality_6m_pct:.1f}%", f"{item.price:.2f}",
             f"{item.di_plus_slope_3d:.2f}/{item.di_plus_slope_5d:.2f}",
@@ -40,12 +41,18 @@ def render_table(candidates: Sequence[Candidate]) -> str:
     return "\n".join((line(headers), separator, *(line(row) for row in rows)))
 
 
-def write_export(path: str | Path, candidates: Sequence[Candidate], format_name: str) -> Path:
+def write_export(
+    path: str | Path,
+    candidates: Sequence[Candidate],
+    format_name: str,
+    *,
+    detail_sheets: bool = False,
+) -> Path:
     output = Path(path).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     records = [candidate.as_dict() for candidate in candidates]
     if format_name == "xlsx":
-        _write_xlsx(output, records)
+        _write_xlsx(output, records, detail_sheets=detail_sheets)
     elif format_name == "json":
         output.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
     else:
@@ -57,7 +64,9 @@ def write_export(path: str | Path, candidates: Sequence[Candidate], format_name:
     return output
 
 
-def _write_xlsx(output: Path, records: list[dict[str, object]]) -> None:
+def _write_xlsx(
+    output: Path, records: list[dict[str, object]], *, detail_sheets: bool = False
+) -> None:
     node = Path(os.environ.get("PRICE_BREAKOUT_NODE", "/Users/jamesserenson/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"))
     node_modules = Path(os.environ.get("PRICE_BREAKOUT_NODE_MODULES", "/Users/jamesserenson/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules"))
     if not node.is_file() or not node_modules.is_dir():
@@ -69,7 +78,10 @@ def _write_xlsx(output: Path, records: list[dict[str, object]]) -> None:
         data_path.write_text(json.dumps(records), encoding="utf-8")
         with as_file(files("price_breakout_scanner").joinpath("xlsx_builder.mjs")) as builder:
             completed = subprocess.run(
-                [str(node), str(builder), str(data_path), str(output.resolve()), str(temp)],
+                [
+                    str(node), str(builder), str(data_path), str(output.resolve()),
+                    str(temp), "details" if detail_sheets else "summary",
+                ],
                 text=True, capture_output=True, check=False, cwd=temp,
             )
         if completed.returncode:
