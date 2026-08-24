@@ -63,13 +63,28 @@ class StateModelTests(unittest.TestCase):
         self.assertEqual(quality, 100.0)
         self.assertEqual(aligned, 126)
 
-    def test_latest_di_rollover_is_reported_even_when_three_day_slope_is_positive(self) -> None:
+    def test_one_bar_di_pause_is_not_rollover_when_three_day_slope_is_positive(self) -> None:
         flags = BreakoutScanner._deterioration_flags(
             [20, 21, 24, 23], [3, 4, 7, 6],
             [1, 2, 3, 4], [1, 2, 3, 4],
             [1, 2, 3, 4], [1, 2, 3, 4],
         )
+        self.assertNotIn("DI+ rolled over", flags)
+
+    def test_multi_bar_di_rollover_is_reported(self) -> None:
+        flags = BreakoutScanner._deterioration_flags(
+            [24, 23, 22, 21], [8, 7, 5, 3],
+            [1, 2, 3, 4], [1, 2, 3, 4],
+            [1, 2, 3, 4], [1, 2, 3, 4],
+        )
         self.assertIn("DI+ rolled over", flags)
+
+    def test_wait_for_confirmation_explains_what_to_watch(self) -> None:
+        message = BreakoutScanner._confirmation_needed(
+            "PRIMED_ENTRY", "INTACT", "CONTROLLED"
+        )
+        self.assertIn("Hold EMA8/EMA21", message)
+        self.assertIn("DI spread", message)
 
     def test_readiness_states_are_explicit_review_buckets(self) -> None:
         self.assertEqual(

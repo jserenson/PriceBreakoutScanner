@@ -15,6 +15,7 @@ class Candidate:
     market_state: str
     readiness_state: str
     review_action: str
+    confirmation_needed: str | None
     momentum_phase: str
     structure_state: str
     extension_state: str

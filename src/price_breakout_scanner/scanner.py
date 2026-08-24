@@ -389,6 +389,9 @@ class BreakoutScanner:
         )
         readiness_state = cls._readiness_state(market_state, momentum_phase)
         review_action = cls._review_action(readiness_state)
+        confirmation_needed = cls._confirmation_needed(
+            readiness_state, structure_state, extension_state,
+        )
         score = cls._ignition_score(
             ignition_state, bars_since_di_cross, di_cross_confirmed,
             adx_at_cross, adx_slope, squeeze_series[-1], squeeze_slope, squeeze_turn,
@@ -415,6 +418,7 @@ class BreakoutScanner:
             score=round(score, 2), setup=ignition_state,
             market_state=market_state, readiness_state=readiness_state,
             review_action=review_action,
+            confirmation_needed=confirmation_needed,
             momentum_phase=momentum_phase,
             structure_state=structure_state,
             extension_state=extension_state, price=round(close, 2),
@@ -613,7 +617,12 @@ class BreakoutScanner:
     ) -> list[str]:
         """Describe current loss of slope; a positive value alone is not enough."""
         flags: list[str] = []
-        if indicators.slope(di_plus, 1) < 0 and indicators.slope(di_spread, 1) < 0:
+        if (
+            indicators.slope(di_plus, 1) < 0
+            and indicators.slope(di_spread, 1) < 0
+            and indicators.slope(di_plus, 3) <= 0
+            and indicators.slope(di_spread, 3) <= 0
+        ):
             flags.append("DI+ rolled over")
         if indicators.slope(di_plus, 3) <= 0:
             flags.append("DI+ declining 3d")
@@ -627,8 +636,6 @@ class BreakoutScanner:
             flags.append("MACD trend deteriorating")
         if timing[-1] <= 0 or indicators.slope(timing, 3) <= 0:
             flags.append("MACD timing deteriorating")
-        elif indicators.slope(timing, 1) < 0:
-            flags.append("MACD timing rolled over")
         return flags
 
     @staticmethod
@@ -771,6 +778,29 @@ class BreakoutScanner:
             "EXTENDED_WAIT_FOR_RESET": "WAIT_FOR_PULLBACK",
             "DETERIORATING_NOT_READY": "AVOID_FOR_NOW",
         }.get(readiness_state, "REVIEW_MANUALLY")
+
+    @staticmethod
+    def _confirmation_needed(
+        readiness_state: str, structure_state: str, extension_state: str,
+    ) -> str | None:
+        """Turn a wait label into a concrete, chart-readable next condition."""
+        if readiness_state == "PRIMED_ENTRY":
+            return (
+                "Hold EMA8/EMA21; +DI stays above -DI and the DI spread keeps "
+                "widening; ADX and momentum lanes continue rising"
+            )
+        if readiness_state == "REPAIRING_STRUCTURE":
+            return (
+                "Price holds above EMA8/EMA21; EMA8 remains above EMA21; "
+                "+DI and momentum continue improving"
+            )
+        if readiness_state == "DIGESTING_WAIT":
+            return "Price holds the EMA ribbon and +DI/MACD momentum resume rising"
+        if readiness_state == "EXTENDED_WAIT_FOR_RESET":
+            return "Price consolidates or tests EMA8/EMA21 without breaking structure"
+        if readiness_state == "DETERIORATING_NOT_READY":
+            return "Require renewed DI-spread expansion and improving momentum before review"
+        return None
 
     @classmethod
     def _bars_since_synchronized_ignition(

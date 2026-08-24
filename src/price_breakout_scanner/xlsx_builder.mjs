@@ -16,6 +16,7 @@ const columnName = (number) => {
 const allColumns = [
   ["Rank", "rank"], ["Symbol", "symbol"], ["Company", "company"], ["Date", "date"],
   ["Ignition Score", "score"], ["Review Action", "review_action"],
+  ["Confirmation Needed", "confirmation_needed"],
   ["Entry Readiness", "readiness_state"], ["Momentum Phase", "momentum_phase"], ["Market State", "market_state"],
   ["Structure State", "structure_state"], ["Extension State", "extension_state"],
   ["6M Trend Quality %", "trend_quality_6m_pct"],
@@ -47,6 +48,7 @@ const allColumns = [
 ];
 const watchlistKeys = new Set([
   "rank", "symbol", "company", "date", "score", "review_action",
+  "confirmation_needed",
   "readiness_state", "momentum_phase", "structure_state", "extension_state",
   "trend_quality_6m_pct", "price", "price_ema8_distance_pct",
   "price_ema8_distance_atr", "bars_since_ignition", "di_plus_slope_3d",
@@ -108,7 +110,7 @@ const methodRows = [
   ["Extension", "Normalize price distance above EMA8 by percent and ATR; also measure price to EMA21/EMA50", "Separate trend quality from entry risk"],
   ["Six-month bar review", "Score close/EMA8/EMA21/EMA50 alignment and each EMA slope on every one of the last 126 trading bars", "Distinguish durable upward structure from a one-day bullish snapshot"],
   ["Momentum phase", "PRIMED, IGNITING, CONTINUING, DIGESTING, REPAIRING, EXTENDED, or DETERIORATING from the recent bar-by-bar slopes", "Separate fresh entry conditions from positive but mature or fading moves"],
-  ["Deterioration flags", "Flag latest-bar DI+ rollover plus 3-bar weakening in DI, TMO, Squeeze, and both MACD histograms", "Do not rank a positive-but-declining indicator as strong"],
+  ["Deterioration flags", "Require multi-bar confirmation for DI+ or MACD timing rollover; also track 3-bar weakening in DI, TMO, Squeeze, and both MACD histograms", "Separate a normal one-bar pause from genuine deterioration"],
   ["Synchronized ignition", "Recent DI cross + restored structure + at least 4 of price above EMA8, MACD Trend, MACD Timing, TMO, and Squeeze improving", "Require clustered confirmation"],
   ["Lifecycle", "BROKEN -> REPAIRING -> PRIMED -> CONFIRMED -> CONFIRMED_EXTENDED -> WEAKENING", "Describe where the chart is, not just whether it passes"],
   ["Hard rejection", "No synchronized repair evidence, failed recent DI cross, or stale ignition", "Remove damaged moves without discarding legitimate repair"],
@@ -136,6 +138,7 @@ if (reportMode === "details") {
       ["Metric", "Value"],
       ["Symbol", record.symbol], ["Company", record.company], ["Data Date", record.date],
       ["Review Action", record.review_action], ["Entry Readiness", record.readiness_state],
+      ["Confirmation Needed", record.confirmation_needed],
       ["Momentum Phase", record.momentum_phase], ["Scanner Score", record.score],
       ["Structure", record.structure_state], ["Extension", record.extension_state],
       ["Price", record.price], ["Price / EMA8 %", record.price_ema8_distance_pct],
