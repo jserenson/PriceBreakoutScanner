@@ -13,13 +13,14 @@ from .models import Candidate
 
 
 def render_table(candidates: Sequence[Candidate]) -> str:
-    headers = ("#", "Symbol", "Score", "Action", "Readiness", "Momentum", "Market", "Structure", "Extension", "6M Quality", "Price", "DI+ 3/5", "DI- 3/5", "Spread 3/5", "ADX", "ADX State", "Ignition", "Deterioration / Reason")
+    headers = ("#", "Symbol", "Score", "Action", "Readiness", "Momentum", "Market", "Structure", "20/50/200", "Extension", "6M Quality", "Price", "DI+ 3/5", "DI- 3/5", "Spread 3/5", "ADX", "ADX State", "Ignition", "Deterioration / Reason")
     rows = [
         (
             item.rank or "-", item.symbol, f"{item.score:.2f}", item.review_action,
             item.readiness_state,
             item.momentum_phase, item.market_state,
-            item.structure_state, item.extension_state, f"{item.trend_quality_6m_pct:.1f}%", f"{item.price:.2f}",
+            item.structure_state, item.long_term_structure, item.extension_state,
+            f"{item.trend_quality_6m_pct:.1f}%", f"{item.price:.2f}",
             f"{item.di_plus_slope_3d:.2f}/{item.di_plus_slope_5d:.2f}",
             f"{item.di_minus_slope_3d:.2f}/{item.di_minus_slope_5d:.2f}",
             f"{item.di_spread_slope_3d:.2f}/{item.di_spread_slope_5d:.2f}",

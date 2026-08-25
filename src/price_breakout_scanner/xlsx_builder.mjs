@@ -23,6 +23,17 @@ const allColumns = [
   ["Positive Structure Bars 6M", "positive_structure_bars_6m"],
   ["Deterioration Flags", "deterioration_flags"],
   ["State", "ignition_state"], ["Price", "price"],
+  ["20/50/200 Structure", "long_term_structure"],
+  ["SMA20", "sma20"], ["SMA50", "sma50"], ["SMA200", "sma200"],
+  ["SMA20 Slope 5D %", "sma20_slope_5d_pct"],
+  ["SMA50 Slope 10D %", "sma50_slope_10d_pct"],
+  ["SMA200 Slope 20D %", "sma200_slope_20d_pct"],
+  ["Price / SMA200 %", "price_sma200_distance_pct"],
+  ["Nearest Support", "nearest_support"],
+  ["Nearest Support Type", "nearest_support_type"],
+  ["Distance to Support %", "distance_to_support_pct"],
+  ["Round Number Below", "round_number_below"],
+  ["Round Number Above", "round_number_above"],
   ["Price / EMA8 %", "price_ema8_distance_pct"], ["Price / EMA21 %", "price_ema21_distance_pct"],
   ["Price / EMA50 %", "price_ema50_distance_pct"], ["Price / EMA8 ATR", "price_ema8_distance_atr"],
   ["EMA8 / EMA21 %", "ema8_ema21_spread_pct"],
@@ -50,6 +61,8 @@ const watchlistKeys = new Set([
   "rank", "symbol", "company", "date", "score", "review_action",
   "confirmation_needed",
   "readiness_state", "momentum_phase", "structure_state", "extension_state",
+  "long_term_structure", "nearest_support", "nearest_support_type",
+  "distance_to_support_pct", "round_number_above",
   "trend_quality_6m_pct", "price", "price_ema8_distance_pct",
   "price_ema8_distance_atr", "bars_since_ignition", "di_plus_slope_3d",
   "di_spread_slope_3d", "adx_state", "deterioration_flags", "rejection_reason",
@@ -78,10 +91,29 @@ if (records.length) {
   const table = sheet.tables.add(used, true, "IgnitionCandidates");
   table.showBandedRows = true;
   table.showFilterButton = true;
-  sheet.getRangeByIndexes(1, 4, records.length, 1).format.numberFormat = "0.00";
-  sheet.getRangeByIndexes(1, 12, records.length, 1).format.numberFormat = "$#,##0.00";
-  sheet.getRangeByIndexes(1, 13, records.length, 3).format.numberFormat = "0.00\"%\"";
-  sheet.getRangeByIndexes(1, 16, records.length, 1).format.numberFormat = "0.00";
+  const formatColumns = (keys, numberFormat) => {
+    for (const key of keys) {
+      const index = columns.findIndex(([, columnKey]) => columnKey === key);
+      if (index >= 0) {
+        sheet.getRangeByIndexes(1, index, records.length, 1).format.numberFormat = numberFormat;
+      }
+    }
+  };
+  formatColumns(["score"], "0.00");
+  formatColumns([
+    "price", "sma20", "sma50", "sma200", "nearest_support",
+    "round_number_below", "round_number_above", "resistance",
+  ], "$#,##0.00");
+  formatColumns([
+    "trend_quality_6m_pct", "sma20_slope_5d_pct", "sma50_slope_10d_pct",
+    "sma200_slope_20d_pct", "price_sma200_distance_pct",
+    "distance_to_support_pct", "price_ema8_distance_pct",
+    "price_ema21_distance_pct", "price_ema50_distance_pct",
+    "ema8_ema21_spread_pct", "move_since_ignition_pct",
+    "distance_to_resistance_pct", "breakout_pct", "range_10d_pct",
+    "higher_low_pct", "momentum_5d_pct", "momentum_20d_pct",
+    "extension_20d_pct", "runup_60d_pct", "ema8_ema50_spread_pct",
+  ], "0.00\"%\"");
   sheet.getRangeByIndexes(1, 4, records.length, 1).conditionalFormats.add("colorScale", {
     thresholds: ["min", "50%", "max"], colors: ["#FECACA", "#FEF3C7", "#BBF7D0"],
   });
@@ -109,6 +141,8 @@ const methodRows = [
   ["ADX state", "Classify rising, falling, flattening, or turning up; flattening after decline is constructive during repair", "Avoid requiring already-high ADX before an early move"],
   ["Extension", "Normalize price distance above EMA8 by percent and ATR; also measure price to EMA21/EMA50", "Separate trend quality from entry risk"],
   ["Six-month bar review", "Score close/EMA8/EMA21/EMA50 alignment and each EMA slope on every one of the last 126 trading bars", "Distinguish durable upward structure from a one-day bullish snapshot"],
+  ["20/50/200 structure", "Report SMA20/SMA50/SMA200 alignment and multi-day slopes as a separate long-term context layer", "Show whether short-term ignition is supported by the widely watched larger trend"],
+  ["Support and round numbers", "Report the nearest support among SMA20/SMA50/SMA200, the 20-day low, and the lower round number; also report the next round number above", "Make pullback risk and psychological trigger levels visible without changing rank"],
   ["Momentum phase", "PRIMED, IGNITING, CONTINUING, DIGESTING, REPAIRING, EXTENDED, or DETERIORATING from the recent bar-by-bar slopes", "Separate fresh entry conditions from positive but mature or fading moves"],
   ["Deterioration flags", "Require multi-bar confirmation for DI+ or MACD timing rollover; also track 3-bar weakening in DI, TMO, Squeeze, and both MACD histograms", "Separate a normal one-bar pause from genuine deterioration"],
   ["Synchronized ignition", "Recent DI cross + restored structure + at least 4 of price above EMA8, MACD Trend, MACD Timing, TMO, and Squeeze improving", "Require clustered confirmation"],
@@ -141,6 +175,17 @@ if (reportMode === "details") {
       ["Confirmation Needed", record.confirmation_needed],
       ["Momentum Phase", record.momentum_phase], ["Scanner Score", record.score],
       ["Structure", record.structure_state], ["Extension", record.extension_state],
+      ["20/50/200 Structure", record.long_term_structure],
+      ["SMA20", record.sma20], ["SMA50", record.sma50], ["SMA200", record.sma200],
+      ["SMA20 Slope 5D %", record.sma20_slope_5d_pct],
+      ["SMA50 Slope 10D %", record.sma50_slope_10d_pct],
+      ["SMA200 Slope 20D %", record.sma200_slope_20d_pct],
+      ["Price / SMA200 %", record.price_sma200_distance_pct],
+      ["Nearest Support", record.nearest_support],
+      ["Nearest Support Type", record.nearest_support_type],
+      ["Distance to Support %", record.distance_to_support_pct],
+      ["Round Number Below", record.round_number_below],
+      ["Round Number Above", record.round_number_above],
       ["Price", record.price], ["Price / EMA8 %", record.price_ema8_distance_pct],
       ["Price / EMA21 %", record.price_ema21_distance_pct],
       ["Price / EMA50 %", record.price_ema50_distance_pct],

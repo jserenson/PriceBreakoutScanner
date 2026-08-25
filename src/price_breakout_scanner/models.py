@@ -23,6 +23,19 @@ class Candidate:
     positive_structure_bars_6m: int
     deterioration_flags: str | None
     price: float
+    long_term_structure: str
+    sma20: float
+    sma50: float
+    sma200: float | None
+    sma20_slope_5d_pct: float
+    sma50_slope_10d_pct: float
+    sma200_slope_20d_pct: float | None
+    price_sma200_distance_pct: float | None
+    nearest_support: float
+    nearest_support_type: str
+    distance_to_support_pct: float
+    round_number_below: float
+    round_number_above: float
     resistance: float
     distance_to_resistance_pct: float
     breakout_pct: float

@@ -1,4 +1,4 @@
-# PriceBreakoutScanner 1.5.2.2
+# PriceBreakoutScanner 1.5.2.3
 
 PriceBreakoutScanner is a **bar-by-bar trend-state and synchronized-ignition
 detector**. It prefers dividend-unadjusted end-of-day
@@ -82,6 +82,12 @@ All signals use data through the selected date—there is no look-ahead.
   scored for price above EMA8, EMA8 above EMA21, EMA21 above EMA50, and positive
   one-bar slopes in all three EMAs. The report includes the resulting percentage
   and the number of fully aligned bars.
+- **20/50/200 structure:** SMA20, SMA50, and SMA200 alignment and their multi-day
+  slopes are reported as a slower context layer. This does not alter ranking in
+  v1.5.2.3; it makes the widely watched larger trend visible during chart review.
+- **Support and price numbers:** the report identifies the nearest support from
+  SMA20/SMA50/SMA200, the 20-day low, or a round-number level, and reports the
+  next round number above price as a possible psychological trigger.
 - **Deterioration:** the latest bar is checked separately so a still-positive
   +DI, TMO, Squeeze, or MACD histogram cannot hide that it has rolled over.
 

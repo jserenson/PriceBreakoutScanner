@@ -6,6 +6,18 @@ from price_breakout_scanner.scanner import BreakoutScanner
 
 
 class StateModelTests(unittest.TestCase):
+    def test_long_term_structure_recognizes_bullish_stack(self) -> None:
+        self.assertEqual(
+            BreakoutScanner._long_term_structure(
+                120.0, 115.0, 108.0, 100.0, 1.0, 0.8, 0.3,
+            ),
+            "BULLISH_STACK",
+        )
+
+    def test_round_number_levels_scale_with_price(self) -> None:
+        self.assertEqual(BreakoutScanner._round_number_levels(23.40), (23.0, 24.0))
+        self.assertEqual(BreakoutScanner._round_number_levels(134.25), (130.0, 140.0))
+
     def test_repairing_structure_recognizes_synchronized_recovery(self) -> None:
         closes = [9.8, 10.0, 10.2, 10.4, 10.7, 11.0]
         ema8 = [10.1, 10.0, 10.0, 10.1, 10.3, 10.6]

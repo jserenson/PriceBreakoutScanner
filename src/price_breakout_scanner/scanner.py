@@ -20,7 +20,7 @@ class BreakoutScanner:
     REQUIRED_TABLES = {"symbols"}
     PREFERRED_PRICE_TABLE = "price_history_unadjusted"
     FALLBACK_PRICE_TABLE = "price_history"
-    HISTORY_BARS = 180
+    HISTORY_BARS = 260
     COMPLETE_COVERAGE = 0.95
 
     def __init__(self, database: str | Path):
@@ -256,6 +256,28 @@ class BreakoutScanner:
         momentum_20 = cls._pct(close, closes[-21])
         sma20 = statistics.fmean(closes[-20:])
         sma50 = statistics.fmean(closes[-50:])
+        sma200 = statistics.fmean(closes[-200:]) if len(closes) >= 200 else None
+        sma20_slope_5 = cls._pct(sma20, statistics.fmean(closes[-25:-5]))
+        sma50_slope_10 = cls._pct(sma50, statistics.fmean(closes[-60:-10]))
+        sma200_slope_20 = (
+            cls._pct(sma200, statistics.fmean(closes[-220:-20]))
+            if sma200 is not None and len(closes) >= 220 else None
+        )
+        long_term_structure = cls._long_term_structure(
+            close, sma20, sma50, sma200,
+            sma20_slope_5, sma50_slope_10, sma200_slope_20,
+        )
+        price_sma200_distance = cls._pct(close, sma200) if sma200 else None
+        round_below, round_above = cls._round_number_levels(close)
+        support_candidates = [
+            (value, label) for value, label in (
+                (sma20, "SMA20"), (sma50, "SMA50"),
+                (sma200, "SMA200"), (min(lows[-20:]), "20D_LOW"),
+                (round_below, "ROUND_NUMBER"),
+            ) if value is not None and value <= close
+        ]
+        nearest_support, nearest_support_type = max(support_candidates)
+        distance_to_support = cls._pct(close, nearest_support)
         sma150 = statistics.fmean(closes[-150:])
         prior_sma150 = statistics.fmean(closes[-170:-20])
         stage_slope = cls._pct(sma150, prior_sma150)
@@ -425,6 +447,23 @@ class BreakoutScanner:
             trend_quality_6m_pct=round(trend_quality_6m, 1),
             positive_structure_bars_6m=positive_structure_bars,
             deterioration_flags=", ".join(deterioration_flags) or None,
+            long_term_structure=long_term_structure,
+            sma20=round(sma20, 2), sma50=round(sma50, 2),
+            sma200=round(sma200, 2) if sma200 is not None else None,
+            sma20_slope_5d_pct=round(sma20_slope_5, 3),
+            sma50_slope_10d_pct=round(sma50_slope_10, 3),
+            sma200_slope_20d_pct=(
+                round(sma200_slope_20, 3) if sma200_slope_20 is not None else None
+            ),
+            price_sma200_distance_pct=(
+                round(price_sma200_distance, 2)
+                if price_sma200_distance is not None else None
+            ),
+            nearest_support=round(nearest_support, 2),
+            nearest_support_type=nearest_support_type,
+            distance_to_support_pct=round(distance_to_support, 2),
+            round_number_below=round(round_below, 2),
+            round_number_above=round(round_above, 2),
             resistance=round(resistance, 2), distance_to_resistance_pct=round(distance, 2),
             breakout_pct=round(breakout_pct, 2), range_10d_pct=round(range_10, 2),
             tightening_ratio=round(tightening, 3), higher_low_pct=round(higher_low, 2),
@@ -566,6 +605,42 @@ class BreakoutScanner:
         if indicators.slope(ema8, 3) > 0 and indicators.slope(ema21, 5) >= 0:
             return "CONTROLLED"
         return "NEUTRAL"
+
+    @staticmethod
+    def _long_term_structure(
+        close: float, sma20: float, sma50: float, sma200: float | None,
+        sma20_slope: float, sma50_slope: float,
+        sma200_slope: float | None,
+    ) -> str:
+        """Describe CJ-style 20/50/200 structure without changing entry rank."""
+        if sma200 is None or sma200_slope is None:
+            return "INSUFFICIENT_HISTORY"
+        if (
+            close > sma20 > sma50 > sma200
+            and sma20_slope > 0 and sma50_slope > 0 and sma200_slope >= 0
+        ):
+            return "BULLISH_STACK"
+        if close < sma200 and sma200_slope < 0:
+            return "BEARISH_BELOW_200"
+        if close > sma200 and sma50_slope >= 0 and sma200_slope >= 0:
+            return "BULLISH_UNSTACKED"
+        if close > sma20 and sma20_slope > 0 and sma50_slope >= 0:
+            return "REPAIRING"
+        return "MIXED"
+
+    @staticmethod
+    def _round_number_levels(price: float) -> tuple[float, float]:
+        """Return psychologically useful round levels immediately around price."""
+        increment = (
+            0.5 if price < 10 else 1.0 if price < 25 else
+            5.0 if price < 100 else 10.0 if price < 250 else
+            25.0 if price < 1000 else 50.0
+        )
+        below = math.floor(price / increment) * increment
+        above = math.ceil(price / increment) * increment
+        if math.isclose(price, above):
+            above += increment
+        return below, above
 
     @staticmethod
     def _adx_state(adx: Sequence[float]) -> str:

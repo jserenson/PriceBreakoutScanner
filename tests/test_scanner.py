@@ -158,6 +158,10 @@ class BreakoutScannerTests(unittest.TestCase):
         self.assertIn("squeeze_count", rows[0])
         self.assertIn("tmo_signal", rows[0])
         self.assertIn("event_risk", rows[0])
+        self.assertIn("long_term_structure", rows[0])
+        self.assertIn("sma200", rows[0])
+        self.assertIn("nearest_support", rows[0])
+        self.assertIn("round_number_above", rows[0])
 
     def test_missing_database_has_clear_error(self) -> None:
         with self.assertRaisesRegex(ScannerError, "Database not found"):
