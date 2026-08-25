@@ -1,4 +1,4 @@
-# PriceBreakoutScanner 1.5.2.3
+# PriceBreakoutScanner 1.5.2.3.1
 
 PriceBreakoutScanner is a **bar-by-bar trend-state and synchronized-ignition
 detector**. It prefers dividend-unadjusted end-of-day

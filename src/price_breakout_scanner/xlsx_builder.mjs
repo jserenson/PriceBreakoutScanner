@@ -226,7 +226,11 @@ if (reportMode === "details") {
 const errors = await workbook.inspect({ kind: "match", searchTerm: "#REF!|#DIV/0!|#VALUE!|#NAME\\?|#N/A", options: { useRegex: true, maxResults: 50 }, summary: "formula error scan" });
 const lastColumn = columnName(columnCount);
 const inspection = await workbook.inspect({ kind: "table", range: `${summaryName}!A1:${lastColumn}${rowCount}`, include: "values,formulas", tableMaxRows: 5, tableMaxCols: columnCount, maxChars: 8000 });
-for (const [sheetName, range] of [[summaryName, `A1:${lastColumn}${Math.min(rowCount, 21)}`], ["Methodology", `A1:C${methodRows.length}`]]) {
+// A full diagnostic report is intentionally very wide. Keep every workbook
+// column, but cap the PNG preview so the renderer does not attempt to allocate
+// a bitmap tens of thousands of pixels across.
+const previewLastColumn = columnName(Math.min(columnCount, 26));
+for (const [sheetName, range] of [[summaryName, `A1:${previewLastColumn}${Math.min(rowCount, 21)}`], ["Methodology", `A1:C${methodRows.length}`]]) {
   const preview = await workbook.render({ sheetName, range, scale: 1, format: "png" });
   await fs.writeFile(path.join(path.dirname(outputPath), `.PriceBreakoutScanner-${sheetName.replaceAll(" ", "-")}.png`), new Uint8Array(await preview.arrayBuffer()));
 }

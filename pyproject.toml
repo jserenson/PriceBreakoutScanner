@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "price-breakout-scanner"
-version = "1.5.2.3"
+version = "1.5.2.3.1"
 description = "Read-only bar-by-bar trend-state and ignition scanner"
 readme = "README.md"
 requires-python = ">=3.10"
